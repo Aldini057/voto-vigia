@@ -1,0 +1,61 @@
+Descripción archivo
+AELEC	Año de elección (2009,2012,2015, 2018 y 2021)
+FELECCION	Fecha de la jornada electoral (formato corto)
+EDOCVE	Clave INE de entidad federativa
+EDONOM	Nombre de la entidad federativa
+MPIOCVE	Clave INE de Municipio
+MPIONOM	Nombre del municipio
+SECCION	Sección electoral en el año correspondiente
+TIPOSEC	Tipo de sección en el año correspondiente (Urbana, Mixta, Rural)
+DEF	Distrito Electoral Federal en el marco cartográfico de la DERFE 2021
+DEL	Distrito Electoral Local en el marco cartográfico de la DERFE 2021
+SEXO	Sexo de las personas (0 Hombres; 1 Mujeres)
+EDAD	Años de edad cumplidos al día de la elección de las personas
+LN	Lista nominal de los cuadernillos para todas las casillas catalogadas
+SV	Registros con marca de voto.
+NV	Registros sin marca de voto.
+NS	Registros no especificados en participación, pues corresponden a:
+	- Registro correspondiente a un cuadernillo sin marcas de votación.
+	- Registro correspondiente a un cuadernillo no disponible para su captura.
+	- Registro correspondiente a un cuadernillo solicitado por autoridad jurisdiccional.
+	- Registro correspondiente a una página no disponible en el cuadernillo
+
+En todos los casos, la fuente de información de la participación ciudadana son los cuadernillos de la lista nominal de las casillas electorales aprobadas por los consejos distritales, por lo que no contempla la participación de las personas que votaron en casillas especiales; tampoco se contempla la participación de las mexicanas y los mexicanos residentes en el extranjero.
+La referencia de la sección de las personas corresponde al lugar de residencia consignado en la credencial electoral. De esta manera, los datos pueden diferir de los datos de otras fuentes de información, como son los cómputos distritales por ser otra la fuente de información corresponde a las actas de escrutinio y cómputo que se levantan en cada casilla electoral que haya sido instalada durante la jornada electoral.
+
+Cada Conteo Censal de Participación está desglosado de acuerdo a la clave INE de entidad federativa:
+
+01	AGUASCALIENTES
+02	BAJA CALIFORNIA
+03	BAJA CALIFORNIA SUR
+04	CAMPECHE
+05	COAHUILA
+06	COLIMA
+07	CHIAPAS
+08	CHIHUAHUA
+09	CIUDAD DE MÉXICO (DISTRITO FEDERAL antes de 2015)
+10	DURANGO
+11	GUANAJUATO
+12	GUERRERO
+13	HIDALGO
+14	JALISCO
+15	ESTADO DE MÉXICO
+16	MICHOACÁN
+17	MORELOS
+18	NAYARIT
+19	NUEVO LEON
+20	OAXACA
+21	PUEBLA
+22	QUERETARO
+23	QUINTANA ROO
+24	SAN LUIS POTOSI
+25	SINALOA
+26	SONORA
+27	TABASCO
+28	TAMAULIPAS
+29	TLAXCALA
+30	VERACRUZ
+31	YUCATAN
+32	ZACATECAS
+
+***

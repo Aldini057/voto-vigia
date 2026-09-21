@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  voto-vigia-app:
+    build: .
+    container_name: voto_vigia_app
+    ports:
+      - "8501:8501"
+    volumes:
+      # Montar modelos y datos para persistir reentrenamientos en caliente
+      - ./models:/app/models
+      - ./data/processed:/app/data/processed
+    restart: unless-stopped
+    environment:
+      - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=500
