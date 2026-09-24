@@ -1,10 +1,8 @@
 FROM python:3.12-slim
 
-# Evitar generación de archivos .pyc y asegurar logs en tiempo real
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Instalar dependencias del sistema necesarias para compilar y procesar datos
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -12,16 +10,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Instalar dependencias de Python aprovechando el caché de Docker
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código fuente y artefactos
-COPY . .
+# Copiar código, plantillas, modelo y datos procesados
+COPY src/ ./src/
+COPY app/ ./app/
+COPY models/ ./models/
+COPY data/processed/ ./data/processed/
 
-# Exponer el puerto por defecto de Streamlit
-EXPOSE 8501
+EXPOSE 8000
 
-# Comando de arranque para la aplicación
-CMD ["streamlit", "run", "app/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+# Usar el puerto que asigne Railway ($PORT) o 8000 por defecto
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
