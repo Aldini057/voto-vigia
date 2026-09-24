@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Semáforo Territorial | VotoVigía{% endblock %}
+
+{% block content %}
+<style>
+  /* Filtro de modo oscuro nativo para OpenStreetMap sin marcas de agua */
+  .leaflet-tile-pane {
+    filter: brightness(0.7) invert(1) contrast(1.3) hue-rotate(200deg);
+  }
+  .leaflet-container {
+    background-color: #020617 !important;
+  }
+</style>
+
+<div>
+  <h2 class="text-xl font-bold text-white flex items-center gap-2">
+    <span>🗺️</span> Semáforo de Riesgo Territorial
+  </h2>
+  <p class="text-xs text-slate-400">
+    Monitoreo, geolocalización de focos rojos y detección anticipada de abstención a nivel sección electoral.
+  </p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+
+  <!-- Contenedor del Mapa con altura forzada en píxeles -->
+  <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+    <div class="flex justify-between items-center mb-3">
+      <span class="text-xs font-semibold text-slate-300">Distribución Espacial de Casillas Auditadas</span>
+      <div class="flex items-center gap-4 text-[11px]">
+        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Riesgo Crítico</span>
+        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Riesgo Medio</span>
+        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Riesgo Bajo</span>
+      </div>
+    </div>
+    <!-- Altura forzada fija para evitar que colapse en 0px -->
+    <div id="mapa" style="height: 520px; width: 100%;" class="rounded-xl border border-slate-800 z-0"></div>
+  </div>
+
+  <!-- Panel Lateral -->
+  <div class="space-y-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
+      <h3 class="text-xs font-semibold text-slate-300 mb-2">Filtrar por Entidad Federativa:</h3>
+      <select id="select-estado" onchange="cambiarEstado()" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500">
+        <option value="TODO EL PAÍS">Todo el País (Nacional)</option>
+      </select>
+    </div>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-lg">
+      <h3 class="text-xs font-semibold text-slate-300">Criterio Estadístico (Z-Score):</h3>
+      <div class="text-[11px] space-y-2 text-slate-400">
+        <p><strong class="text-rose-400">🔴 Riesgo Crítico:</strong> Z &lt; -1.25 σ (Foco rojo).</p>
+        <p><strong class="text-amber-400">🟡 Riesgo Medio:</strong> -1.25 &le; Z &lt; -0.50 σ (Alerta preventiva).</p>
+        <p><strong class="text-emerald-400">🟢 Riesgo Bajo:</strong> Z &ge; -0.50 σ (Participación normal).</p>
+      </div>
+    </div>
+
+    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 text-center">
+      <p class="text-xs text-slate-400 mb-3">¿Deseas simular una política pública preventiva?</p>
+      <a href="/simulador" class="inline-block w-full bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 text-xs font-medium py-2.5 rounded-xl transition">
+        Abrir Simulador What-If ➔
+      </a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let map = null;
+  let layers = null;
+
+  function initMap() {
+    if (map !== null) return;
+    map = L.map('mapa').setView([23.6345, -102.5528], 5);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    layers = L.layerGroup().addTo(map);
+  }
+
+  async function cargarDatos(estado = "TODO EL PAÍS") {
+    try {
+      const res = await fetch('/api/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delta_participacion_previa: 0.0,
+          delta_pct_jovenes: 0.0,
+          es_presidencial: 1,
+          entidad: estado
+        })
+      });
+      
+      if (!res.ok) {
+        console.error("Error al llamar /api/simulate:", res.status);
+        return;
+      }
+
+      const data = await res.json();
+      map.flyTo(data.centroide, data.zoom, { duration: 1.0 });
+      layers.clearLayers();
+
+      // 1. Pintar Casillas Verdes (Bajo)
+      if (data.puntos_bajos) {
+        data.puntos_bajos.forEach(p => {
+          L.circleMarker([p.lat, p.lng], {
+            radius: 5,
+            fillColor: '#10b981',
+            color: '#059669',
+            weight: 1,
+            fillOpacity: 0.8
+          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM}, ${p.EDONOM}<br><span style="color:#10b981;font-weight:bold;">🟢 Riesgo Bajo (Normal)</span>`).addTo(layers);
+        });
+      }
+
+      // 2. Pintar Casillas Amarillas (Medio)
+      if (data.puntos_medios) {
+        data.puntos_medios.forEach(p => {
+          L.circleMarker([p.lat, p.lng], {
+            radius: 5.5,
+            fillColor: '#f59e0b',
+            color: '#d97706',
+            weight: 1,
+            fillOpacity: 0.85
+          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM}, ${p.EDONOM}<br><span style="color:#f59e0b;font-weight:bold;">🟡 Riesgo Medio (Preventivo)</span>`).addTo(layers);
+        });
+      }
+
+      // 3. Pintar Casillas Rojas (Crítico)
+      if (data.puntos_criticos) {
+        data.puntos_criticos.forEach(p => {
+          L.circleMarker([p.lat, p.lng], {
+            radius: 6.5,
+            fillColor: '#f43f5e',
+            color: '#be123c',
+            weight: 1.5,
+            fillOpacity: 0.9
+          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM}, ${p.EDONOM}<br><span style="color:#f43f5e;font-weight:bold;">🔴 Riesgo Crítico (Foco Rojo)</span>`).addTo(layers);
+        });
+      }
+
+    } catch (err) {
+      console.error("Error en cargarDatos:", err);
+    }
+  }
+
+  async function init() {
+    initMap();
+    try {
+      const res = await fetch('/api/states');
+      if (res.ok) {
+        const estados = await res.json();
+        const sel = document.getElementById('select-estado');
+        sel.innerHTML = '<option value="TODO EL PAÍS">Todo el País (Nacional)</option>';
+        estados.forEach(e => {
+          const opt = document.createElement('option');
+          opt.value = e;
+          opt.innerText = e;
+          sel.appendChild(opt);
+        });
+      }
+    } catch (err) {
+      console.error("Error cargando estados:", err);
+    }
+    cargarDatos("TODO EL PAÍS");
+  }
+
+  function cambiarEstado() {
+    const estado = document.getElementById('select-estado').value;
+    cargarDatos(estado);
+  }
+
+  // Ejecutar inicialización
+  init();
+</script>
+{% endblock %}

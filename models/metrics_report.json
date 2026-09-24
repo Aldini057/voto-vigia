@@ -1,0 +1,58 @@
+{
+    "fecha_entrenamiento": "2026-09-23 19:51:54",
+    "duracion_segundos": 12.8,
+    "secciones_entrenamiento": 132975,
+    "secciones_prueba_2024": 66674,
+    "accuracy": 0.6593,
+    "f1_macro_catboost": 0.4442,
+    "f1_macro_baseline": 0.3328,
+    "reporte_clasificacion": {
+        "Bajo (Verde)": {
+            "precision": 0.8696765288630647,
+            "recall": 0.7356458203867955,
+            "f1-score": 0.797065964783416,
+            "support": 53103.0
+        },
+        "Medio (Amarillo)": {
+            "precision": 0.2890852997581923,
+            "recall": 0.4610985503391408,
+            "f1-score": 0.3553710537105371,
+            "support": 7519.0
+        },
+        "Critico (Rojo)": {
+            "precision": 0.1458717475927064,
+            "recall": 0.23529411764705882,
+            "f1-score": 0.1800935879600354,
+            "support": 6052.0
+        },
+        "accuracy": 0.6592674805771365,
+        "macro avg": {
+            "precision": 0.43487785873798784,
+            "recall": 0.47734616279099845,
+            "f1-score": 0.4441768688179961,
+            "support": 66674.0
+        },
+        "weighted avg": {
+            "precision": 0.7385019782453165,
+            "recall": 0.6592674805771365,
+            "f1-score": 0.6912522913741098,
+            "support": 66674.0
+        }
+    },
+    "features_utilizadas": [
+        "part_lag_inmediata",
+        "part_lag_homologa",
+        "delta_historica_previa",
+        "pct_crecimiento_ln",
+        "pct_jovenes_19_29",
+        "pct_18",
+        "pct_mayores_65",
+        "ratio_mujeres",
+        "ln_total",
+        "es_eleccion_presidencial",
+        "EDOCVE",
+        "MPIOCVE",
+        "TIPOSEC",
+        "DEF"
+    ]
+}

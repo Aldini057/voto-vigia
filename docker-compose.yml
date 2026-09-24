@@ -1,15 +1,17 @@
 version: '3.8'
 
 services:
-  voto-vigia-app:
+  voto-vigia-api:
     build: .
-    container_name: voto_vigia_app
+    container_name: voto_vigia_container
     ports:
-      - "8501:8501"
+      - "8000:8000"
     volumes:
-      # Montar modelos y datos para persistir reentrenamientos en caliente
+      # Montar modelos y datos para persistencia
       - ./models:/app/models
       - ./data/processed:/app/data/processed
+      # Montar la carpeta app para ver cambios en la UI sin reconstruir la imagen
+      - ./app:/app/app
     restart: unless-stopped
     environment:
-      - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=500
+      - PYTHONUNBUFFERED=1

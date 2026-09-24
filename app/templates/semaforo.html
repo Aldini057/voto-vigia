@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Semáforo Territorial | VotoVigía{% endblock %}
+
+{% block content %}
+<div>
+  <h2 class="text-xl font-bold text-white flex items-center gap-2"><span>🗺️</span> Semáforo de Riesgo Territorial</h2>
+  <p class="text-xs text-slate-400">Monitoreo y geolocalización de focos rojos a nivel sección electoral.</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+  <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+    <div id="mapa" class="h-[540px] rounded-xl border border-slate-800"></div>
+  </div>
+
+  <div class="space-y-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <h3 class="text-xs font-semibold text-slate-300 mb-2">Filtrar Estado:</h3>
+      <select id="select-estado" onchange="cambiarEstado()" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+        <option value="TODO EL PAÍS">Todo el País (Nacional)</option>
+      </select>
+    </div>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2 text-[11px] text-slate-400">
+      <h3 class="text-xs font-semibold text-slate-300">Simbología:</h3>
+      <p class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> <strong>Rojo (Crítico):</strong> Desviación < -1.25 σ</p>
+      <p class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> <strong>Verde (Bajo):</strong> Participación Normal</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  let map, layers;
+  function initMap() {
+    map = L.map('mapa').setView([23.6345, -102.5528], 5);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(map);
+    layers = L.layerGroup().addTo(map);
+  }
+
+  async function cargarDatos(estado = "TODO EL PAÍS") {
+    const res = await fetch('/api/simulate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ delta_participacion_previa: 0.0, delta_pct_jovenes: 0.0, es_presidencial: 1, entidad: estado })
+    });
+    const data = await res.json();
+    map.flyTo(data.centroide, data.zoom, { duration: 1.0 });
+    layers.clearLayers();
+
+    data.puntos_criticos.forEach(p => {
+      L.circleMarker([p.lat, p.lng], { radius: 5, fillColor: '#f43f5e', color: '#be123c', weight: 1, fillOpacity: 0.8 })
+        .bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM}<br><span style="color:#f43f5e">Riesgo Crítico</span>`).addTo(layers);
+    });
+  }
+
+  async function init() {
+    initMap();
+    const res = await fetch('/api/states');
+    const estados = await res.json();
+    const sel = document.getElementById('select-estado');
+    estados.forEach(e => { const opt = document.createElement('option'); opt.value = e; opt.innerText = e; sel.appendChild(opt); });
+    cargarDatos();
+  }
+
+  function cambiarEstado() { cargarDatos(document.getElementById('select-estado').value); }
+  init();
+</script>
+{% endblock %}
