@@ -4,25 +4,31 @@ import json
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
-# Permitir importar módulos desde src/
+# 1. Configuración de rutas de módulos
 sys.path.append(os.path.abspath("src"))
 from src.simulation.what_if_engine import WhatIfEngine
 
+# 2. CREAR PRIMERO LA INSTANCIA DE FASTAPI
 app = FastAPI(
     title="VotoVigía API",
     description="Microservicio de Alerta Temprana y Simulación Contrafactual de Riesgo Electoral (Hackathon INE 2026)",
     version="1.0.0"
 )
 
-# Configurar motor de plantillas Jinja2
+# 3. Configurar plantillas Jinja2 y montar carpeta estática (después de crear app)
 DIR_TEMPLATES = os.path.join(os.path.dirname(__file__), "templates")
 templates = Jinja2Templates(directory=DIR_TEMPLATES)
 
-# Cargar dataset y modelo en memoria
+DIR_STATIC = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(DIR_STATIC, exist_ok=True)
+app.mount("/static", StaticFiles(directory=DIR_STATIC), name="static")
+
+# 4. Cargar dataset maestro y modelo
 RUTA_DATASET = "data/processed/dataset_maestro.parquet"
 RUTA_METRICAS = "models/metrics_report.json"
 
@@ -37,7 +43,7 @@ else:
 
 engine = WhatIfEngine()
 
-# Coordenadas centroidales ajustadas en tierra firme
+# Coordenadas centroidales en tierra firme
 COORDENADAS_ESTADOS = {
     "AGUASCALIENTES": [21.8853, -102.2916], "BAJA CALIFORNIA": [30.5000, -114.9000],
     "BAJA CALIFORNIA SUR": [25.5000, -111.4000], "CAMPECHE": [19.1500, -90.1000],
@@ -57,6 +63,37 @@ COORDENADAS_ESTADOS = {
     "YUCATAN": [20.7000, -89.0000], "ZACATECAS": [22.7709, -102.5832]
 }
 
+def geocodificar(df_sub, max_puntos=45):
+    """Genera coordenadas en tierra firme para cada sección."""
+    if df_sub is None or len(df_sub) == 0:
+        return []
+    n = min(max_puntos, len(df_sub))
+    muestra = df_sub.head(n).copy()
+    lats, lngs = [], []
+    
+    for _, row in muestra.iterrows():
+        edo_raw = str(row.get("EDONOM", "JALISCO")).upper()
+        edo_clean = (edo_raw.replace("Á","A").replace("É","E").replace("Í","I")
+                            .replace("Ó","O").replace("Ú","U"))
+        coords = COORDENADAS_ESTADOS.get(edo_clean, [23.6345, -102.5528])
+        lat_c, lng_c = coords
+        
+        sec_id = str(row.get("id_seccion", "00_0000"))
+        h1 = (int(abs(hash(sec_id))) % 1000) / 1000.0 - 0.5
+        h2 = (int(abs(hash(sec_id + "_lng"))) % 1000) / 1000.0 - 0.5
+        
+        desp_lat = h1 * 0.28
+        desp_lng = h2 * 0.32
+        
+        lats.append(round(float(lat_c + desp_lat), 5))
+        lngs.append(round(float(lng_c + desp_lng), 5))
+        
+    muestra["lat"] = lats
+    muestra["lng"] = lngs
+    cols = ["id_seccion", "EDONOM", "MPIONOM", "SECCION", "TIPOSEC", "ln_total", "participacion", "lat", "lng"]
+    cols_ok = [c for c in cols if c in muestra.columns]
+    return muestra[cols_ok].to_dict(orient="records")
+
 class SimulacionRequest(BaseModel):
     delta_participacion_previa: float = Field(0.0, ge=-0.30, le=0.30)
     delta_pct_jovenes: float = Field(0.0, ge=-0.10, le=0.10)
@@ -66,30 +103,27 @@ class SimulacionRequest(BaseModel):
 # ==========================================
 # RUTAS DE PÁGINAS WEB (HTML / JINJA2)
 # ==========================================
-
-@app.get("/", include_in_schema=False)
-def page_semaforo(request: Request):
+@app.get("/")
+async def index(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"active_page": "semaforo"}
+        context={
+            "carto_api_key": os.getenv("CARTO_API_KEY", "")
+        }
     )
+
+@app.get("/", include_in_schema=False)
+def page_semaforo(request: Request):
+    return templates.TemplateResponse(request=request, name="index.html", context={"active_page": "semaforo"})
 
 @app.get("/simulador", include_in_schema=False)
 def page_simulador(request: Request):
-    return templates.TemplateResponse(
-        request=request,
-        name="simulador.html",
-        context={"active_page": "simulador"}
-    )
+    return templates.TemplateResponse(request=request, name="simulador.html", context={"active_page": "simulador"})
 
 @app.get("/metricas", include_in_schema=False)
 def page_metricas(request: Request):
-    return templates.TemplateResponse(
-        request=request,
-        name="metricas.html",
-        context={"active_page": "metricas"}
-    )
+    return templates.TemplateResponse(request=request, name="metricas.html", context={"active_page": "metricas"})
 
 # ==========================================
 # ENDPOINTS REST DE LA API
@@ -97,12 +131,7 @@ def page_metricas(request: Request):
 
 @app.get("/api/health", tags=["Estado"])
 def health_check():
-    return {
-        "status": "online",
-        "secciones_activas": len(df_2024),
-        "modelo": "CatBoostClassifier (Multiclase)",
-        "version": "1.0.0"
-    }
+    return {"status": "online", "secciones": len(df_2024)}
 
 @app.get("/api/metrics", tags=["Métricas"])
 def get_metrics():
@@ -120,9 +149,8 @@ def get_states() -> List[str]:
 @app.post("/api/simulate", tags=["Simulación What-If"])
 def simulate_intervention(req: SimulacionRequest):
     if df_2024.empty:
-        raise HTTPException(status_code=500, detail="Dataset no disponible.")
+        raise HTTPException(status_code=500, detail="Dataset no cargado.")
 
-    # Filtro geográfico
     if req.entidad and req.entidad != "TODO EL PAÍS":
         df_target = df_2024[df_2024["EDONOM"] == req.entidad].copy()
         edo_clean = (req.entidad.upper().replace("Á","A").replace("É","E")
@@ -135,9 +163,8 @@ def simulate_intervention(req: SimulacionRequest):
         zoom = 5
 
     if df_target.empty:
-        raise HTTPException(status_code=404, detail="No se encontraron casillas para esta entidad.")
+        raise HTTPException(status_code=404, detail="No se encontraron casillas.")
 
-    # Inferencia con CatBoost
     res = engine.simular_intervencion(
         df_base=df_target,
         delta_participacion_previa=req.delta_participacion_previa,
@@ -154,43 +181,44 @@ def simulate_intervention(req: SimulacionRequest):
     bajos = df_res[r_sim == 0]
     rescatadas = df_res[(r_base == 2) & (r_sim < 2)]
 
-    # Dispersión territorial orgánica por hash (sin anillos ni círculos concéntricos)
-    def geocodificar(df_sub, max_puntos=45):
-        if df_sub is None or len(df_sub) == 0:
-            return []
-        n = min(max_puntos, len(df_sub))
-        muestra = df_sub.head(n).copy()
-        lats, lngs = [], []
-        
-        for _, row in muestra.iterrows():
-            edo_raw = str(row.get("EDONOM", "JALISCO")).upper()
-            edo_clean = (edo_raw.replace("Á","A").replace("É","E").replace("Í","I")
-                                .replace("Ó","O").replace("Ú","U"))
-            coords = COORDENADAS_ESTADOS.get(edo_clean, [23.6345, -102.5528])
-            lat_c, lng_c = coords
-            
-            # Hash determinista único por sección: dispersión elíptica asimétrica
-            sec_id = str(row.get("id_seccion", "00_0000"))
-            h1 = (int(abs(hash(sec_id))) % 1000) / 1000.0 - 0.5
-            h2 = (int(abs(hash(sec_id + "_lng"))) % 1000) / 1000.0 - 0.5
-            
-            # Dispersión orgánica suave sobre el territorio
-            desp_lat = h1 * 0.28
-            desp_lng = h2 * 0.32
-            
-            lats.append(round(float(lat_c + desp_lat), 5))
-            lngs.append(round(float(lng_c + desp_lng), 5))
-            
-        muestra["lat"] = lats
-        muestra["lng"] = lngs
-        cols = ["id_seccion", "EDONOM", "MPIONOM", "SECCION", "TIPOSEC", "ln_total", "participacion", "lat", "lng"]
-        cols_ok = [c for c in cols if c in muestra.columns]
-        return muestra[cols_ok].to_dict(orient="records")
-
     puntos_criticos = geocodificar(criticos, max_puntos=45)
     puntos_medios = geocodificar(medios, max_puntos=35)
     puntos_bajos = geocodificar(bajos, max_puntos=45)
     puntos_rescatados = geocodificar(rescatadas, max_puntos=35)
+
+    # Cálculo del semáforo para cada estado (GeoJSON)
+    estados_metricas = {}
+    for edo_cve, grupo in df_res.groupby("EDOCVE"):
+        total_sec = len(grupo)
+        r_sim_g = pd.to_numeric(grupo["riesgo_simulado"], errors="coerce").fillna(0).astype(int)
+        n_crit = int((r_sim_g == 2).sum())
+        pct_crit = (n_crit / total_sec) if total_sec > 0 else 0.0
+        part_prom = float(grupo["participacion"].mean() * 100) if "participacion" in grupo.columns else 0.0
+        
+        if pct_crit > 0.15:
+            color = "#f43f5e" # Rojo
+            etiqueta = "Riesgo Crítico"
+        elif pct_crit > 0.05:
+            color = "#f59e0b" # Amarillo
+            etiqueta = "Riesgo Medio"
+        else:
+            color = "#10b981" # Verde
+            etiqueta = "Riesgo Bajo"
+            
+        try:
+            cve_int = int(edo_cve)
+        except:
+            cve_int = 0
+
+        estados_metricas[cve_int] = {
+            "nombre": str(grupo["EDONOM"].iloc[0]),
+            "total_casillas": total_sec,
+            "focos_rojos": n_crit,
+            "pct_critico": round(pct_crit * 100, 1),
+            "participacion_media": round(part_prom, 1),
+            "color": color,
+            "etiqueta": etiqueta
+        }
 
     return {
         "entidad_analizada": req.entidad or "NACIONAL",
@@ -205,7 +233,8 @@ def simulate_intervention(req: SimulacionRequest):
         "puntos_criticos": puntos_criticos,
         "puntos_medios": puntos_medios,
         "puntos_bajos": puntos_bajos,
-        "puntos_rescatados": puntos_rescatados
+        "puntos_rescatados": puntos_rescatados,
+        "estados_metricas": estados_metricas
     }
 
 if __name__ == "__main__":

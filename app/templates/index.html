@@ -3,12 +3,22 @@
 
 {% block content %}
 <style>
-  /* Filtro de modo oscuro nativo para OpenStreetMap sin marcas de agua */
-  .leaflet-tile-pane {
-    filter: brightness(0.7) invert(1) contrast(1.3) hue-rotate(200deg);
-  }
   .leaflet-container {
     background-color: #020617 !important;
+  }
+  /* Estilo oscuro y limpio para los tooltips flotantes */
+  .leaflet-tooltip {
+    background-color: #0f172a !important;
+    border: 1px solid #334155 !important;
+    color: #f8fafc !important;
+    border-radius: 8px !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+  }
+  .leaflet-tooltip-top:before,
+  .leaflet-tooltip-bottom:before,
+  .leaflet-tooltip-left:before,
+  .leaflet-tooltip-right:before {
+    display: none !important;
   }
 </style>
 
@@ -21,9 +31,9 @@
   </p>
 </div>
 
-<div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-4">
 
-  <!-- Contenedor del Mapa con altura forzada en píxeles -->
+  <!-- Contenedor del Mapa -->
   <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
     <div class="flex justify-between items-center mb-3">
       <span class="text-xs font-semibold text-slate-300">Distribución Espacial de Casillas Auditadas</span>
@@ -33,7 +43,6 @@
         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Riesgo Bajo</span>
       </div>
     </div>
-    <!-- Altura forzada fija para evitar que colapse en 0px -->
     <div id="mapa" style="height: 520px; width: 100%;" class="rounded-xl border border-slate-800 z-0"></div>
   </div>
 
@@ -66,21 +75,207 @@
 </div>
 
 <script>
+  // Obtención segura de la API Key: toma la inyectada por el backend o tu clave validada
+  const cartoApiKey = "{{ carto_api_key|default('') }}".trim() || "cb1_40yx_1_b53b1be7b1ac3fa9f4f5165b";
+  const authParam = cartoApiKey ? `?key=${cartoApiKey}` : '';
+
   let map = null;
   let layers = null;
+  let labelsLayer = null;
+  let geojsonLayer = null;
+  let rawGeoJSON = null;
+  let cacheMetricasEstados = {};
+  let estadoActualSeleccionado = "TODO EL PAÍS";
+
+  // Normalizador de nombres formales para evitar ruido en tooltips
+  function simplificarNombreEstado(nombre) {
+    if (!nombre) return "Estado";
+    
+    const mapaNombres = {
+      "COAHUILA DE ZARAGOZA": "Coahuila",
+      "VERACRUZ DE IGNACIO DE LA LLAVE": "Veracruz",
+      "MICHOACÁN DE OCAMPO": "Michoacán",
+      "MICHOACAN DE OCAMPO": "Michoacán",
+      "QUERÉTARO DE ARTEAGA": "Querétaro",
+      "QUERETARO DE ARTEAGA": "Querétaro",
+      "MÉXICO": "Estado de México",
+      "MEXICO": "Estado de México"
+    };
+
+    const key = nombre.trim().toUpperCase();
+    if (mapaNombres[key]) {
+      return mapaNombres[key];
+    }
+
+    return nombre.toLowerCase().replace(/(^|\s)\S/g, l => l.toUpperCase());
+  }
 
   function initMap() {
     if (map !== null) return;
+
     map = L.map('mapa').setView([23.6345, -102.5528], 5);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '&copy; OpenStreetMap contributors'
+
+    // 1. Capa base oscura 100% limpia sin texto (CartoDB No Labels)
+    const baseTilesUrl = `https://basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}.png${authParam}`;
+    L.tileLayer(baseTilesUrl, {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/" target="_blank">CARTO</a>'
     }).addTo(map);
+
+    // 2. Panel superior exclusivo para etiquetas con clicks desactivados
+    map.createPane('labelsPane');
+    map.getPane('labelsPane').style.zIndex = 450;
+    map.getPane('labelsPane').style.pointerEvents = 'none';
+
+    const labelsTilesUrl = `https://basemaps.cartocdn.com/rastertiles/dark_only_labels/{z}/{x}/{y}.png${authParam}`;
+    labelsLayer = L.tileLayer(labelsTilesUrl, {
+      maxZoom: 19,
+      pane: 'labelsPane'
+    });
+
+    // 3. Activar nombres de calles/colonias solo cuando se hace zoom a nivel local (>= 10)
+    map.on('zoomend', () => {
+      const zoom = map.getZoom();
+      if (zoom >= 10) {
+        if (!map.hasLayer(labelsLayer)) map.addLayer(labelsLayer);
+      } else {
+        if (map.hasLayer(labelsLayer)) map.removeLayer(labelsLayer);
+      }
+    });
+
     layers = L.layerGroup().addTo(map);
+  }
+
+  async function cargarGeoJSON() {
+    if (!rawGeoJSON) {
+      try {
+        const res = await fetch('/static/geojson/mexico_estados.geojson');
+        if (res.ok) {
+          rawGeoJSON = await res.json();
+        }
+      } catch (e) {
+        console.warn("No se pudo cargar el archivo GeoJSON:", e);
+      }
+    }
+  }
+
+  function obtenerEstiloEstado(cve, nombreEstado) {
+    const meta = cacheMetricasEstados[cve];
+    const color = meta ? meta.color : "#334155";
+    
+    const esActivo = estadoActualSeleccionado !== "TODO EL PAÍS" && 
+      (nombreEstado.trim().toUpperCase() === estadoActualSeleccionado.trim().toUpperCase() || 
+       (meta && meta.nombre && meta.nombre.trim().toUpperCase() === estadoActualSeleccionado.trim().toUpperCase()));
+
+    if (estadoActualSeleccionado === "TODO EL PAÍS") {
+      return {
+        fillColor: color,
+        weight: 1.5,
+        opacity: 1,
+        color: '#1e293b',
+        fillOpacity: 0.65
+      };
+    }
+
+    if (esActivo) {
+      return {
+        fillColor: color,
+        weight: 3,
+        opacity: 1,
+        color: '#ffffff',
+        fillOpacity: 0.9
+      };
+    }
+
+    // Estados inactivos: atenuados pero totalmente clicables
+    return {
+      fillColor: color,
+      weight: 1,
+      opacity: 0.7,
+      color: '#0f172a',
+      fillOpacity: 0.25
+    };
+  }
+
+  function actualizarEstilosMapa() {
+    if (!geojsonLayer) return;
+    geojsonLayer.eachLayer(layer => {
+      const cve = parseInt(layer.feature.properties.state_code || layer.feature.properties.id || 0);
+      const nombre = layer.feature.properties.state_name || (cacheMetricasEstados[cve] ? cacheMetricasEstados[cve].nombre : "");
+      layer.setStyle(obtenerEstiloEstado(cve, nombre));
+    });
+  }
+
+  function renderizarCapaGeoJSON() {
+    if (!rawGeoJSON || geojsonLayer) return;
+
+    geojsonLayer = L.geoJSON(rawGeoJSON, {
+      style: function (feature) {
+        const cve = parseInt(feature.properties.state_code || feature.properties.id || 0);
+        const nombre = feature.properties.state_name || "";
+        return obtenerEstiloEstado(cve, nombre);
+      },
+      onEachFeature: function (feature, layer) {
+        const cve = parseInt(feature.properties.state_code || feature.properties.id || 0);
+        const meta = cacheMetricasEstados[cve];
+        const nombreOriginal = (meta && meta.nombre) ? meta.nombre : (feature.properties.state_name || "Estado");
+        const nombreVisible = simplificarNombreEstado(nombreOriginal);
+
+        if (meta) {
+          layer.bindTooltip(`
+            <div style="font-family: sans-serif; font-size: 11px;">
+              <b style="font-size: 13px; color: #f8fafc;">${nombreVisible}</b><br>
+              <span style="color: #94a3b8;">Semáforo:</span> <b>${meta.etiqueta}</b><br>
+              <span style="color: #94a3b8;">Focos Rojos:</span> <b>${meta.focos_rojos} / ${meta.total_casillas} (${meta.pct_critico}%)</b><br>
+              <span style="color: #94a3b8;">Participación Estimada:</span> <b>${meta.participacion_media}%</b>
+            </div>
+          `, { sticky: true });
+        }
+
+        layer.on({
+          mouseover: function (e) {
+            const l = e.target;
+            l.setStyle({ weight: 2.5, color: '#ffffff', fillOpacity: 0.85 });
+            l.bringToFront();
+          },
+          mouseout: function (e) {
+            const cveActual = parseInt(feature.properties.state_code || feature.properties.id || 0);
+            const nombreActual = feature.properties.state_name || "";
+            e.target.setStyle(obtenerEstiloEstado(cveActual, nombreActual));
+          },
+          click: function (e) {
+            L.DomEvent.stopPropagation(e);
+            
+            const sel = document.getElementById('select-estado');
+            let encontrado = false;
+            
+            // Buscar coincidencia en el combobox
+            for (let i = 0; i < sel.options.length; i++) {
+              const optVal = sel.options[i].value.trim().toUpperCase();
+              if (optVal === nombreOriginal.trim().toUpperCase() || 
+                  optVal === nombreVisible.trim().toUpperCase()) {
+                sel.selectedIndex = i;
+                encontrado = true;
+                break;
+              }
+            }
+
+            if (encontrado) {
+              cambiarEstado();
+            } else {
+              map.fitBounds(e.target.getBounds());
+            }
+          }
+        });
+      }
+    }).addTo(map);
   }
 
   async function cargarDatos(estado = "TODO EL PAÍS") {
     try {
+      estadoActualSeleccionado = estado;
+      await cargarGeoJSON();
+
       const res = await fetch('/api/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -91,52 +286,44 @@
           entidad: estado
         })
       });
-      
+
       if (!res.ok) {
-        console.error("Error al llamar /api/simulate:", res.status);
+        console.error("Error al consultar /api/simulate:", res.status);
         return;
       }
 
       const data = await res.json();
-      map.flyTo(data.centroide, data.zoom, { duration: 1.0 });
+
+      // Guardar métricas en caché para que las demás entidades no pierdan datos ni colores
+      if (data.estados_metricas && Object.keys(data.estados_metricas).length > 0) {
+        if (estado === "TODO EL PAÍS" || Object.keys(cacheMetricasEstados).length === 0) {
+          cacheMetricasEstados = data.estados_metricas;
+        }
+      }
+
+      // Dibujar la capa por primera vez o solo refrescar estilos
+      if (!geojsonLayer) {
+        renderizarCapaGeoJSON();
+      } else {
+        actualizarEstilosMapa();
+      }
+
+      // Desplazamiento suave de la vista
+      if (data.centroide && data.zoom) {
+        map.flyTo(data.centroide, data.zoom, { duration: 1.0 });
+      }
+
+      // Puntos críticos / casillas
       layers.clearLayers();
-
-      // 1. Pintar Casillas Verdes (Bajo)
-      if (data.puntos_bajos) {
-        data.puntos_bajos.forEach(p => {
-          L.circleMarker([p.lat, p.lng], {
-            radius: 5,
-            fillColor: '#10b981',
-            color: '#059669',
-            weight: 1,
-            fillOpacity: 0.8
-          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM}, ${p.EDONOM}<br><span style="color:#10b981;font-weight:bold;">🟢 Riesgo Bajo (Normal)</span>`).addTo(layers);
-        });
-      }
-
-      // 2. Pintar Casillas Amarillas (Medio)
-      if (data.puntos_medios) {
-        data.puntos_medios.forEach(p => {
-          L.circleMarker([p.lat, p.lng], {
-            radius: 5.5,
-            fillColor: '#f59e0b',
-            color: '#d97706',
-            weight: 1,
-            fillOpacity: 0.85
-          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM}, ${p.EDONOM}<br><span style="color:#f59e0b;font-weight:bold;">🟡 Riesgo Medio (Preventivo)</span>`).addTo(layers);
-        });
-      }
-
-      // 3. Pintar Casillas Rojas (Crítico)
-      if (data.puntos_criticos) {
+      if (data.puntos_criticos && Array.isArray(data.puntos_criticos)) {
         data.puntos_criticos.forEach(p => {
           L.circleMarker([p.lat, p.lng], {
-            radius: 6.5,
+            radius: 5,
             fillColor: '#f43f5e',
             color: '#be123c',
             weight: 1.5,
             fillOpacity: 0.9
-          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM}, ${p.EDONOM}<br><span style="color:#f43f5e;font-weight:bold;">🔴 Riesgo Crítico (Foco Rojo)</span>`).addTo(layers);
+          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM || ''}<br><span style="color:#f43f5e">🔴 Foco Rojo</span>`).addTo(layers);
         });
       }
 
@@ -163,6 +350,8 @@
     } catch (err) {
       console.error("Error cargando estados:", err);
     }
+    
+    // Carga inicial nacional
     cargarDatos("TODO EL PAÍS");
   }
 
@@ -171,7 +360,6 @@
     cargarDatos(estado);
   }
 
-  // Ejecutar inicialización
-  init();
+  window.addEventListener('load', init);
 </script>
 {% endblock %}
