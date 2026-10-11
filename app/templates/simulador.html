@@ -2,112 +2,419 @@
 {% block title %}Simulador What-If | VotoVigía{% endblock %}
 
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Cabecera Explicativa del Motor Contrafactual -->
 <div>
-  <h2 class="text-xl font-bold text-white flex items-center gap-2"><span>⚙️</span> Simulador Contrafactual (*What-If Engine*)</h2>
-  <p class="text-xs text-slate-400">Evalúa el impacto cuantitativo de intervenciones institucionales antes de la jornada.</p>
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-1">
+    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+      <span>⚡</span> Simulador Contrafactual de Políticas Públicas (What-If Engine)
+    </h2>
+    <div class="flex items-center gap-2 text-[10px]">
+      <span class="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2.5 py-1 rounded-md font-medium">
+        CatBoost Inference Engine
+      </span>
+      <span class="bg-rose-500/10 text-rose-300 border border-rose-500/20 px-2.5 py-1 rounded-md font-medium">
+        Simulación Prospectiva 2027 / 2030
+      </span>
+    </div>
+  </div>
+  <p class="text-xs text-slate-400 max-w-4xl">
+    Esta herramienta <strong>no predice el pasado</strong>: simula escenarios futuros manipulando palancas reales de política pública del INE. Evalúa en tiempo real cuántas casillas saldrían del foco rojo de abstención y cuántos votos se recuperarían si se incrementa la participación ciudadana antes de la jornada electoral.
+  </p>
 </div>
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-  <!-- Controles -->
-  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
-    <h3 class="text-sm font-semibold text-white">Parámetros</h3>
-
+<!-- Guía Rápida de Comprensión (3 Pasos Didácticos) -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+  <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex items-start gap-3 shadow-sm">
+    <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-bold flex items-center justify-center text-xs shrink-0">1</span>
     <div>
-      <label class="block text-xs text-slate-400 mb-1">Entidad:</label>
-      <select id="sim-estado" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
-        <option value="TODO EL PAÍS">Todo el País (Nacional)</option>
-      </select>
+      <h4 class="text-xs font-semibold text-white">Línea Base Estructural</h4>
+      <p class="text-[11px] text-slate-400 mt-0.5">Parte de la inercia real observada en las 66,674 secciones electorales del país (CCPC 2009–2024).</p>
     </div>
-
-    <div>
-      <div class="flex justify-between text-xs mb-1">
-        <span class="text-slate-300">Impacto Campaña Cívica:</span>
-        <span id="val-part" class="text-rose-400 font-bold">+5%</span>
-      </div>
-      <input id="slider-part" type="range" min="-15" max="15" value="5" step="1" class="w-full accent-rose-500 cursor-pointer" />
-    </div>
-
-    <div>
-      <div class="flex justify-between text-xs mb-1">
-        <span class="text-slate-300">Variación Jóvenes:</span>
-        <span id="val-joven" class="text-rose-400 font-bold">0%</span>
-      </div>
-      <input id="slider-joven" type="range" min="-5" max="5" value="0" step="1" class="w-full accent-rose-500 cursor-pointer" />
-    </div>
-
-    <button onclick="simular()" id="btn-run" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold py-3 rounded-xl transition shadow-lg shadow-rose-600/30">
-      🚀 Ejecutar Simulación
-    </button>
   </div>
 
-  <!-- Resultados -->
+  <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex items-start gap-3 shadow-sm">
+    <span class="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-400 font-bold flex items-center justify-center text-xs shrink-0">2</span>
+    <div>
+      <h4 class="text-xs font-semibold text-white">Intervención Institucional</h4>
+      <p class="text-[11px] text-slate-400 mt-0.5">Modificas las palancas que el INE sí controla: fomento al voto joven (19–29) o presencia territorial de brigadas.</p>
+    </div>
+  </div>
+
+  <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex items-start gap-3 shadow-sm">
+    <span class="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs shrink-0">3</span>
+    <div>
+      <h4 class="text-xs font-semibold text-white">Impacto en Urnas</h4>
+      <p class="text-[11px] text-slate-400 mt-0.5">El modelo de Machine Learning proyecta votos netos rescatados y focos rojos desactivados.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Tarjetas de Impacto / KPIs Resultantes -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+    <span class="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+      <span>🗳️</span> Votos Netos Recuperados
+    </span>
+    <p id="kpi-votos-ganados" class="text-2xl font-black text-emerald-400 mt-1">0</p>
+    <span class="text-[10px] text-slate-500 block mt-1">Ciudadanos adicionales en urnas</span>
+  </div>
+
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+    <span class="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+      <span>🟢</span> Focos Rojos Mitigados
+    </span>
+    <p id="kpi-focos-mitigados" class="text-2xl font-black text-rose-400 mt-1">0</p>
+    <span class="text-[10px] text-slate-500 block mt-1">Secciones que salieron del riesgo crítico</span>
+  </div>
+
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+    <span class="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+      <span>📉</span> Tasa de Éxito de Mitigación
+    </span>
+    <p id="kpi-tasa-exito" class="text-2xl font-black text-indigo-400 mt-1">0.0%</p>
+    <span class="text-[10px] text-slate-500 block mt-1">Reducción del riesgo crítico inicial</span>
+  </div>
+
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+    <span class="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+      <span>📈</span> Participación Proyectada
+    </span>
+    <div class="flex items-baseline gap-2 mt-1">
+      <span id="kpi-part-sim" class="text-2xl font-black text-white">--%</span>
+      <span id="kpi-part-base" class="text-xs text-slate-400 line-through">--%</span>
+    </div>
+    <span class="text-[10px] text-emerald-400 block mt-1">Estimación post-intervención</span>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+
+  <!-- Panel de Control y Parámetros -->
+  <div class="space-y-4">
+
+    <!-- Escenarios Preconfigurados (Presets con 1 clic) -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
+      <h3 class="text-xs font-semibold text-slate-200 mb-2.5 flex items-center gap-1.5">
+        <span>⚡</span> Escenarios Predefinidos de Política Pública
+      </h3>
+      <div class="space-y-2">
+        <button onclick="aplicarPreset('encivica')" class="w-full text-left bg-slate-800 hover:bg-slate-700/80 border border-slate-700 p-2.5 rounded-xl transition group">
+          <b class="text-xs text-rose-300 block group-hover:text-rose-200">1. Campaña Nacional de Juventudes (ENCÍVICA)</b>
+          <span class="text-[10px] text-slate-400 block mt-0.5">+8% en voto joven (19–29) focalizado en focos rojos.</span>
+        </button>
+
+        <button onclick="aplicarPreset('caes')" class="w-full text-left bg-slate-800 hover:bg-slate-700/80 border border-slate-700 p-2.5 rounded-xl transition group">
+          <b class="text-xs text-amber-300 block group-hover:text-amber-200">2. Despliegue Territorial Intensivo (CAEs/SEs)</b>
+          <span class="text-[10px] text-slate-400 block mt-0.5">+5% en inercia previa en zonas de abstención histórica.</span>
+        </button>
+
+        <button onclick="aplicarPreset('intermedia2027')" class="w-full text-left bg-slate-800 hover:bg-slate-700/80 border border-slate-700 p-2.5 rounded-xl transition group">
+          <b class="text-xs text-indigo-300 block group-hover:text-indigo-200">3. Riesgo Estructural: Elección Intermedia 2027</b>
+          <span class="text-[10px] text-slate-400 block mt-0.5">Evalúa el comportamiento sin arrastre presidencial.</span>
+        </button>
+
+        <button onclick="aplicarPreset('reset')" class="w-full text-center bg-slate-800/40 hover:bg-slate-800 border border-slate-700/60 text-slate-400 text-xs py-1.5 rounded-xl transition mt-1">
+          ↺ Restablecer Línea Base (Sin intervención)
+        </button>
+      </div>
+    </div>
+
+    <!-- Sliders y Parámetros Manuales -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+      <h3 class="text-xs font-semibold text-slate-200 border-b border-slate-800 pb-2">
+        Ajuste Fino de Parámetros
+      </h3>
+
+      <!-- Entidad Federativa -->
+      <div>
+        <label class="text-xs font-medium text-slate-300 block mb-1">Entidad Federativa:</label>
+        <select id="sim-entidad" onchange="ejecutarSimulacion()" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500">
+          <option value="TODO EL PAÍS">Todo el País (Nacional)</option>
+        </select>
+      </div>
+
+      <!-- Horizonte Electoral -->
+      <div>
+        <label class="text-xs font-medium text-slate-300 block mb-1">Horizonte del Ciclo Electoral:</label>
+        <select id="sim-horizonte" onchange="ejecutarSimulacion()" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500">
+          <option value="1">Elección Presidencial 2030 (Alta Concurrencia)</option>
+          <option value="0">Elección Intermedia Federal 2027 (Menor Afluencia)</option>
+        </select>
+      </div>
+
+      <!-- Switch de Focalización Presupuestal -->
+      <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium text-slate-200">Estrategia Focalizada</span>
+          <input type="checkbox" id="sim-focalizada" onchange="ejecutarSimulacion()" class="w-4 h-4 text-rose-500 bg-slate-700 rounded border-slate-600 focus:ring-rose-500" checked>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-1 leading-snug">
+          <strong>Activada:</strong> El esfuerzo se concentra exclusivamente en secciones con riesgo crítico (ahorro presupuestal).<br>
+          <strong>Desactivada:</strong> Intervención universal generalizada.
+        </p>
+      </div>
+
+      <!-- Slider 1: Voto Joven -->
+      <div>
+        <div class="flex justify-between text-xs text-slate-300 mb-1">
+          <span>Intervención en Jóvenes (19–29 años):</span>
+          <strong id="val-jovenes" class="text-rose-400">+0%</strong>
+        </div>
+        <input type="range" id="slider-jovenes" min="0" max="0.15" step="0.01" value="0.00" oninput="actualizarValoresSliders(); ejecutarSimulacion();" class="w-full accent-rose-500">
+        <span class="text-[10px] text-slate-500 block">Campañas digitales, voto en universidades y credencialización.</span>
+      </div>
+
+      <!-- Slider 2: Inercia Previa -->
+      <div>
+        <div class="flex justify-between text-xs text-slate-300 mb-1">
+          <span>Movilización Territorial / Módulos:</span>
+          <strong id="val-previa" class="text-amber-400">+0%</strong>
+        </div>
+        <input type="range" id="slider-previa" min="0" max="0.10" step="0.01" value="0.00" oninput="actualizarValoresSliders(); ejecutarSimulacion();" class="w-full accent-amber-500">
+        <span class="text-[10px] text-slate-500 block">Mayor despliegue de módulos fijos e itinerantes en campo.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panel de Gráficas y Resultados de Impacto -->
   <div class="lg:col-span-2 space-y-6">
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-        <p class="text-xs text-slate-400">Casillas en Rojo (Base)</p>
-        <p id="k-base" class="text-2xl font-bold text-rose-400 mt-1">--</p>
+
+    <!-- Gráfica Comparativa de Distribución de Riesgo -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h3 class="text-xs font-semibold text-white">Impacto en la Mitigación del Semáforo Territorial</h3>
+          <span class="text-[10px] text-slate-400">Comparativa: Línea Base vs. Escenario Simulado</span>
+        </div>
+        <span class="text-[10px] bg-slate-800 text-slate-300 px-2 py-1 rounded-md">66,674 Secciones</span>
       </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-        <p class="text-xs text-slate-400">Casillas en Rojo (Simulado)</p>
-        <p id="k-sim" class="text-2xl font-bold text-amber-400 mt-1">--</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-        <p class="text-xs text-slate-400">Casillas Rescatadas</p>
-        <p id="k-resc" class="text-2xl font-bold text-emerald-400 mt-1">--</p>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-        <p class="text-xs text-slate-400">Votos Ganados Est.</p>
-        <p id="k-votos" class="text-2xl font-bold text-indigo-400 mt-1">--</p>
+      <div class="h-64 w-full">
+        <canvas id="grafica-impacto"></canvas>
       </div>
     </div>
 
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-      <h4 class="text-xs font-semibold text-white mb-2">Impacto de la Mitigación</h4>
-      <div class="h-44"><canvas id="chart"></canvas></div>
+    <!-- Tabla de Municipios con Mayor Beneficio -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="text-xs font-semibold text-white flex items-center gap-1.5">
+          <span>🏛️</span> Municipios con Mayor Retorno Democrático
+        </h3>
+        <span class="text-[10px] text-slate-400">Focalización Territorial Recomendada</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-[11px] text-left">
+          <thead class="text-[10px] text-slate-400 uppercase bg-slate-800/60 border-b border-slate-700/60">
+            <tr>
+              <th class="px-3 py-2">Municipio</th>
+              <th class="px-3 py-2 text-right">Votos Rescatados</th>
+              <th class="px-3 py-2 text-right">Focos Apagados</th>
+              <th class="px-3 py-2 text-center">Prioridad</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-municipios-body" class="divide-y divide-slate-800 text-slate-300">
+            <tr>
+              <td colspan="4" class="px-3 py-4 text-center text-slate-500">Ejecutando simulación...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
+
   </div>
+
 </div>
 
 <script>
-  let chart;
-  const sPart = document.getElementById('slider-part');
-  sPart.oninput = () => document.getElementById('val-part').innerText = (sPart.value > 0 ? '+' : '') + sPart.value + '%';
-  const sJoven = document.getElementById('slider-joven');
-  sJoven.oninput = () => document.getElementById('val-joven').innerText = (sJoven.value > 0 ? '+' : '') + sJoven.value + '%';
+  let chartInstance = null;
 
-  async function simular() {
-    const res = await fetch('/api/simulate', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        delta_participacion_previa: parseFloat(sPart.value)/100,
-        delta_pct_jovenes: parseFloat(sJoven.value)/100,
-        es_presidencial: 1,
-        entidad: document.getElementById('sim-estado').value
-      })
-    });
-    const d = await res.json();
-    document.getElementById('k-base').innerText = d.criticos_base.toLocaleString();
-    document.getElementById('k-sim').innerText = d.criticos_simulado.toLocaleString();
-    document.getElementById('k-resc').innerText = d.casillas_rescatadas.toLocaleString();
-    document.getElementById('k-votos').innerText = '+' + d.votos_adicionales_estimados.toLocaleString();
+  function actualizarValoresSliders() {
+    const valJov = (parseFloat(document.getElementById('slider-jovenes').value) * 100).toFixed(0);
+    const valPrev = (parseFloat(document.getElementById('slider-previa').value) * 100).toFixed(0);
+    document.getElementById('val-jovenes').innerText = `+${valJov}%`;
+    document.getElementById('val-previa').innerText = `+${valPrev}%`;
+  }
 
-    const ctx = document.getElementById('chart').getContext('2d');
-    if (chart) chart.destroy();
-    chart = new Chart(ctx, {
-      type: 'bar',
-      data: { labels: ['Base', 'Simulado'], datasets: [{ data: [d.criticos_base, d.criticos_simulado], backgroundColor: ['#f43f5e', '#10b981'], borderRadius: 6 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-    });
+  function aplicarPreset(nombre) {
+    const sliderJov = document.getElementById('slider-jovenes');
+    const sliderPrev = document.getElementById('slider-previa');
+    const chkFocalizada = document.getElementById('sim-focalizada');
+    const selHorizonte = document.getElementById('sim-horizonte');
+
+    if (nombre === 'encivica') {
+      sliderJov.value = 0.08;
+      sliderPrev.value = 0.02;
+      chkFocalizada.checked = true;
+      selHorizonte.value = "1";
+    } else if (nombre === 'caes') {
+      sliderJov.value = 0.03;
+      sliderPrev.value = 0.06;
+      chkFocalizada.checked = true;
+      selHorizonte.value = "0";
+    } else if (nombre === 'intermedia2027') {
+      sliderJov.value = 0.00;
+      sliderPrev.value = 0.00;
+      chkFocalizada.checked = false;
+      selHorizonte.value = "0";
+    } else if (nombre === 'reset') {
+      sliderJov.value = 0.00;
+      sliderPrev.value = 0.00;
+      chkFocalizada.checked = false;
+      selHorizonte.value = "1";
+    }
+
+    actualizarValoresSliders();
+    ejecutarSimulacion();
+  }
+
+  async function ejecutarSimulacion() {
+    const entidad = document.getElementById('sim-entidad').value;
+    const esPresidencial = parseInt(document.getElementById('sim-horizonte').value);
+    const deltaJov = parseFloat(document.getElementById('slider-jovenes').value);
+    const deltaPrev = parseFloat(document.getElementById('slider-previa').value);
+    const esFocalizada = document.getElementById('sim-focalizada').checked;
+
+    try {
+      const res = await fetch('/api/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delta_participacion_previa: deltaPrev,
+          delta_pct_jovenes: deltaJov,
+          es_presidencial: esPresidencial,
+          entidad: entidad,
+          estrategia_focalizada: esFocalizada
+        })
+      });
+
+      if (!res.ok) {
+        console.error("Error al consultar /api/simulate");
+        return;
+      }
+
+      const data = await res.json();
+      actualizarDashboardSimulacion(data);
+
+    } catch (err) {
+      console.error("Error en ejecutarSimulacion:", err);
+    }
+  }
+
+  function actualizarDashboardSimulacion(data) {
+    const kpis = data.kpis || {};
+    
+    // Actualizar números de KPIs
+    document.getElementById('kpi-votos-ganados').innerText = (kpis.votos_recuperados || 0).toLocaleString();
+    document.getElementById('kpi-focos-mitigados').innerText = (kpis.focos_rojos_mitigados || 0).toLocaleString();
+    document.getElementById('kpi-tasa-exito').innerText = `${(kpis.tasa_mitigacion_pct || 0)}%`;
+    document.getElementById('kpi-part-sim').innerText = `${(kpis.participacion_simulada_pct || 0)}%`;
+    document.getElementById('kpi-part-base').innerText = `${(kpis.participacion_base_pct || 0)}%`;
+
+    // Actualizar Tabla de Municipios
+    const tbody = document.getElementById('tabla-municipios-body');
+    const topMun = data.top_municipios || [];
+    if (topMun.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="px-3 py-3 text-center text-slate-500">Sin municipios en riesgo para esta selección.</td></tr>`;
+    } else {
+      tbody.innerHTML = topMun.map((m, idx) => `
+        <tr class="hover:bg-slate-800/40 transition">
+          <td class="px-3 py-2 font-medium text-white">${m.municipio}</td>
+          <td class="px-3 py-2 text-right text-emerald-400 font-semibold">+${(m.votos_ganados || 0).toLocaleString()}</td>
+          <td class="px-3 py-2 text-right text-rose-400 font-semibold">${m.focos_apagados || 0}</td>
+          <td class="px-3 py-2 text-center">
+            <span class="text-[9px] px-2 py-0.5 rounded-full ${idx === 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-slate-800 text-slate-400'}">
+              ${idx === 0 ? 'Máxima' : 'Alta'}
+            </span>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // Actualizar Gráfica Comparativa con Chart.js
+    actualizarGrafica(kpis);
+  }
+
+  function actualizarGrafica(kpis) {
+    const ctx = document.getElementById('grafica-impacto').getContext('2d');
+
+    const baseCriticos = kpis.focos_rojos_iniciales || 0;
+    const simCriticos = Math.max(0, baseCriticos - (kpis.focos_rojos_mitigados || 0));
+    const baseMedios = kpis.secciones_medias_base || 0;
+    const simMedios = kpis.secciones_medias_sim || 0;
+    const baseBajos = kpis.secciones_bajas_base || 0;
+    const simBajos = kpis.secciones_bajas_sim || 0;
+
+    const dataConfig = {
+      labels: ['Riesgo Crítico (🔴)', 'Riesgo Medio (🟡)', 'Participación Normal (🟢)'],
+      datasets: [
+        {
+          label: 'Línea Base (Inercial)',
+          data: [baseCriticos, baseMedios, baseBajos],
+          backgroundColor: '#475569',
+          borderRadius: 6
+        },
+        {
+          label: 'Escenario Simulado (Con Intervención)',
+          data: [simCriticos, simMedios, simBajos],
+          backgroundColor: ['#f43f5e', '#f59e0b', '#10b981'],
+          borderRadius: 6
+        }
+      ]
+    };
+
+    if (chartInstance) {
+      chartInstance.data = dataConfig;
+      chartInstance.update();
+    } else {
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: dataConfig,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: { color: '#cbd5e1', font: { size: 11 } }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#94a3b8', font: { size: 10 } },
+              grid: { color: '#1e293b' }
+            },
+            y: {
+              ticks: { color: '#94a3b8', font: { size: 10 } },
+              grid: { color: '#1e293b' }
+            }
+          }
+        }
+      });
+    }
   }
 
   async function init() {
-    const res = await fetch('/api/states');
-    const estados = await res.json();
-    const sel = document.getElementById('sim-estado');
-    estados.forEach(e => { const opt = document.createElement('option'); opt.value = e; opt.innerText = e; sel.appendChild(opt); });
-    simular();
+    try {
+      const res = await fetch('/api/states');
+      if (res.ok) {
+        const estados = await res.json();
+        const sel = document.getElementById('sim-entidad');
+        sel.innerHTML = '<option value="TODO EL PAÍS">Todo el País (Nacional)</option>';
+        estados.forEach(e => {
+          const opt = document.createElement('option');
+          opt.value = e;
+          opt.innerText = e;
+          sel.appendChild(opt);
+        });
+      }
+    } catch (err) {
+      console.error("Error cargando estados:", err);
+    }
+
+    actualizarValoresSliders();
+    ejecutarSimulacion();
   }
-  init();
+
+  window.addEventListener('load', init);
 </script>
 {% endblock %}

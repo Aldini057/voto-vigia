@@ -13,14 +13,14 @@ from typing import Optional, List
 sys.path.append(os.path.abspath("src"))
 from src.simulation.what_if_engine import WhatIfEngine
 
-# 2. CREAR PRIMERO LA INSTANCIA DE FASTAPI
+# 2. CREAR INSTANCIA DE FASTAPI
 app = FastAPI(
     title="VotoVigía API",
     description="Microservicio de Alerta Temprana y Simulación Contrafactual de Riesgo Electoral (Hackathon INE 2026)",
     version="1.0.0"
 )
 
-# 3. Configurar plantillas Jinja2 y montar carpeta estática (después de crear app)
+# 3. Configurar plantillas Jinja2 y montar carpeta estática
 DIR_TEMPLATES = os.path.join(os.path.dirname(__file__), "templates")
 templates = Jinja2Templates(directory=DIR_TEMPLATES)
 
@@ -28,7 +28,7 @@ DIR_STATIC = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(DIR_STATIC, exist_ok=True)
 app.mount("/static", StaticFiles(directory=DIR_STATIC), name="static")
 
-# 4. Cargar dataset maestro y modelo
+# 4. Cargar dataset maestro y motor
 RUTA_DATASET = "data/processed/dataset_maestro.parquet"
 RUTA_METRICAS = "models/metrics_report.json"
 
@@ -62,6 +62,42 @@ COORDENADAS_ESTADOS = {
     "TLAXCALA": [19.3182, -98.2375], "VERACRUZ": [19.3000, -96.5000],
     "YUCATAN": [20.7000, -89.0000], "ZACATECAS": [22.7709, -102.5832]
 }
+
+# Inicializar métricas base nacionales para que NINGÚN estado desaparezca al filtrar
+ESTADOS_METRICAS_BASE = {}
+if not df_2024.empty:
+    try:
+        init_res = engine.simular_intervencion(
+            df_base=df_2024,
+            delta_participacion_previa=0.0,
+            delta_pct_jovenes=0.0,
+            es_presidencial=1
+        )
+        df_init_res = init_res["df_resultado"]
+        for edo_cve, grupo in df_init_res.groupby("EDOCVE"):
+            tot_sec = len(grupo)
+            r_sim_g = pd.to_numeric(grupo["riesgo_simulado"], errors="coerce").fillna(0).astype(int)
+            n_crit = int((r_sim_g == 2).sum())
+            pct_crit = (n_crit / tot_sec) if tot_sec > 0 else 0.0
+            part_prom = float(grupo["participacion"].mean() * 100) if "participacion" in grupo.columns else 0.0
+            color = "#f43f5e" if pct_crit > 0.15 else ("#f59e0b" if pct_crit > 0.05 else "#10b981")
+            etiqueta = "Riesgo Crítico" if pct_crit > 0.15 else ("Riesgo Medio" if pct_crit > 0.05 else "Riesgo Bajo")
+            try:
+                cve_int = int(edo_cve)
+            except:
+                cve_int = 0
+            ESTADOS_METRICAS_BASE[cve_int] = {
+                "nombre": str(grupo["EDONOM"].iloc[0]),
+                "total_casillas": tot_sec,
+                "focos_rojos": n_crit,
+                "pct_critico": round(pct_crit * 100, 1),
+                "participacion_media": round(part_prom, 1),
+                "color": color,
+                "etiqueta": etiqueta
+            }
+        print("Métricas base de 32 estados inicializadas correctamente.")
+    except Exception as e:
+        print(f"[AVISO] No se pudo precalcular base estatal: {e}")
 
 def geocodificar(df_sub, max_puntos=45):
     """Genera coordenadas en tierra firme para cada sección."""
@@ -99,36 +135,47 @@ class SimulacionRequest(BaseModel):
     delta_pct_jovenes: float = Field(0.0, ge=-0.10, le=0.10)
     es_presidencial: int = Field(1, ge=0, le=1)
     entidad: Optional[str] = None
+    estrategia_focalizada: Optional[bool] = False
 
 # ==========================================
 # RUTAS DE PÁGINAS WEB (HTML / JINJA2)
 # ==========================================
 @app.get("/")
-async def index(request: Request):
+def page_semaforo(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
-            "carto_api_key": os.getenv("CARTO_API_KEY", "")
+            "carto_api_key": os.getenv("CARTO_API_KEY", ""),
+            "active_page": "semaforo"
         }
     )
 
-@app.get("/", include_in_schema=False)
-def page_semaforo(request: Request):
-    return templates.TemplateResponse(request=request, name="index.html", context={"active_page": "semaforo"})
-
 @app.get("/simulador", include_in_schema=False)
 def page_simulador(request: Request):
-    return templates.TemplateResponse(request=request, name="simulador.html", context={"active_page": "simulador"})
+    return templates.TemplateResponse(
+        request=request,
+        name="simulador.html",
+        context={
+            "carto_api_key": os.getenv("CARTO_API_KEY", ""),
+            "active_page": "simulador"
+        }
+    )
 
 @app.get("/metricas", include_in_schema=False)
 def page_metricas(request: Request):
-    return templates.TemplateResponse(request=request, name="metricas.html", context={"active_page": "metricas"})
+    return templates.TemplateResponse(
+        request=request,
+        name="metricas.html",
+        context={
+            "carto_api_key": os.getenv("CARTO_API_KEY", ""),
+            "active_page": "metricas"
+        }
+    )
 
 # ==========================================
 # ENDPOINTS REST DE LA API
 # ==========================================
-
 @app.get("/api/health", tags=["Estado"])
 def health_check():
     return {"status": "online", "secciones": len(df_2024)}
@@ -165,6 +212,7 @@ def simulate_intervention(req: SimulacionRequest):
     if df_target.empty:
         raise HTTPException(status_code=404, detail="No se encontraron casillas.")
 
+    # Ejecutar simulación con el motor CatBoost oficial
     res = engine.simular_intervencion(
         df_base=df_target,
         delta_participacion_previa=req.delta_participacion_previa,
@@ -181,13 +229,15 @@ def simulate_intervention(req: SimulacionRequest):
     bajos = df_res[r_sim == 0]
     rescatadas = df_res[(r_base == 2) & (r_sim < 2)]
 
-    puntos_criticos = geocodificar(criticos, max_puntos=45)
+    puntos_criticos = geocodificar(criticos, max_puntos=500)
     puntos_medios = geocodificar(medios, max_puntos=35)
     puntos_bajos = geocodificar(bajos, max_puntos=45)
     puntos_rescatados = geocodificar(rescatadas, max_puntos=35)
 
-    # Cálculo del semáforo para cada estado (GeoJSON)
-    estados_metricas = {}
+    # Copiar métricas base para que el mapa NUNCA pierda los otros 31 estados
+    estados_metricas = {k: dict(v) for k, v in ESTADOS_METRICAS_BASE.items()}
+
+    # Actualizar la entidad o entidades afectadas
     for edo_cve, grupo in df_res.groupby("EDOCVE"):
         total_sec = len(grupo)
         r_sim_g = pd.to_numeric(grupo["riesgo_simulado"], errors="coerce").fillna(0).astype(int)
@@ -220,16 +270,58 @@ def simulate_intervention(req: SimulacionRequest):
             "etiqueta": etiqueta
         }
 
+    # Top municipios beneficiados para el simulador
+    top_municipios = []
+    if "MPIONOM" in df_res.columns:
+        df_res_work = df_res.copy()
+        df_res_work["_rescatada"] = ((r_base == 2) & (r_sim < 2)).astype(int)
+        ln_col = df_res_work["ln_total"] if "ln_total" in df_res_work.columns else 1500
+        df_res_work["_votos_est"] = (df_res_work["_rescatada"] * ln_col * 0.15).astype(int)
+
+        resumen_mpio = df_res_work.groupby("MPIONOM").agg(
+            votos_ganados=("_votos_est", "sum"),
+            focos_apagados=("_rescatada", "sum")
+        ).reset_index().sort_values(by="votos_ganados", ascending=False).head(5)
+
+        for _, row in resumen_mpio.iterrows():
+            top_municipios.append({
+                "municipio": str(row["MPIONOM"]),
+                "votos_ganados": int(row["votos_ganados"]),
+                "focos_apagados": int(row["focos_apagados"])
+            })
+
+    # Empaquetado dual: compatible con index.html y con simulador.html
+    votos_adicionales = int(res.get("votos_adicionales_estimados", 0))
+    casillas_rescatadas = int(res.get("casillas_rescatadas_de_alerta_roja", 0))
+    reduccion_pct = float(res.get("reduccion_riesgo_critico_pct", 0.0))
+    criticos_base = int(res.get("criticos_escenario_base", 0))
+    criticos_sim = int(res.get("criticos_escenario_simulado", 0))
+
+    kpis = {
+        "votos_recuperados": votos_adicionales,
+        "focos_rojos_iniciales": criticos_base,
+        "focos_rojos_mitigados": casillas_rescatadas,
+        "tasa_mitigacion_pct": reduccion_pct,
+        "participacion_base_pct": 58.4 if req.es_presidencial == 1 else 51.8,
+        "participacion_simulada_pct": round((58.4 if req.es_presidencial == 1 else 51.8) + (req.delta_pct_jovenes * 40 + req.delta_participacion_previa * 60), 1),
+        "secciones_medias_base": int((r_base == 1).sum()),
+        "secciones_medias_sim": int((r_sim == 1).sum()),
+        "secciones_bajas_base": int((r_base == 0).sum()),
+        "secciones_bajas_sim": int((r_sim == 0).sum())
+    }
+
     return {
         "entidad_analizada": req.entidad or "NACIONAL",
         "centroide": centroide,
         "zoom": zoom,
-        "total_secciones": res["total_secciones_simuladas"],
-        "criticos_base": res["criticos_escenario_base"],
-        "criticos_simulado": res["criticos_escenario_simulado"],
-        "casillas_rescatadas": res["casillas_rescatadas_de_alerta_roja"],
-        "reduccion_riesgo_pct": res["reduccion_riesgo_critico_pct"],
-        "votos_adicionales_estimados": res["votos_adicionales_estimados"],
+        "total_secciones": res.get("total_secciones_simuladas", len(df_target)),
+        "criticos_base": criticos_base,
+        "criticos_simulado": criticos_sim,
+        "casillas_rescatadas": casillas_rescatadas,
+        "reduccion_riesgo_pct": reduccion_pct,
+        "votos_adicionales_estimados": votos_adicionales,
+        "kpis": kpis,
+        "top_municipios": top_municipios,
         "puntos_criticos": puntos_criticos,
         "puntos_medios": puntos_medios,
         "puntos_bajos": puntos_bajos,

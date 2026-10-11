@@ -6,7 +6,6 @@
   .leaflet-container {
     background-color: #020617 !important;
   }
-  /* Estilo oscuro y limpio para los tooltips flotantes */
   .leaflet-tooltip {
     background-color: #0f172a !important;
     border: 1px solid #334155 !important;
@@ -22,75 +21,130 @@
   }
 </style>
 
+<!-- Cabecera Institucional y Explicativa -->
 <div>
-  <h2 class="text-xl font-bold text-white flex items-center gap-2">
-    <span>🗺️</span> Semáforo de Riesgo Territorial
-  </h2>
-  <p class="text-xs text-slate-400">
-    Monitoreo, geolocalización de focos rojos y detección anticipada de abstención a nivel sección electoral.
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-1">
+    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+      <span>🗺️</span> Semáforo de Riesgo Territorial
+    </h2>
+    <div class="flex items-center gap-2 text-[10px]">
+      <span class="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2.5 py-1 rounded-md font-medium">
+        Microdatos CCPC INE (2009–2024)
+      </span>
+      <span class="bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2.5 py-1 rounded-md font-medium">
+        Modelo Apartidista de Participación
+      </span>
+    </div>
+  </div>
+  <p class="text-xs text-slate-400 max-w-4xl">
+    Sistema prospectivo de alerta temprana para la planeación del INE rumbo a los próximos procesos electorales federales (Intermedia 2027 / Presidencial 2030). Identifica secciones en riesgo de abstención estructural antes de la jornada electoral.
   </p>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-4">
 
-  <!-- Contenedor del Mapa -->
+  <!-- Contenedor del Mapa con Tarjeta Flotante -->
   <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
-    <div class="flex justify-between items-center mb-3">
-      <span class="text-xs font-semibold text-slate-300">Distribución Espacial de Casillas Auditadas</span>
+    <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+      <div>
+        <span class="text-xs font-semibold text-slate-200">Vulnerabilidad Electoral por Entidad Federativa</span>
+        <span class="block text-[10px] text-slate-400">Proyección de riesgo relativo al promedio histórico estatal</span>
+      </div>
       <div class="flex items-center gap-4 text-[11px]">
         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Riesgo Crítico</span>
         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Riesgo Medio</span>
         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Riesgo Bajo</span>
       </div>
     </div>
-    <div id="mapa" style="height: 520px; width: 100%;" class="rounded-xl border border-slate-800 z-0"></div>
+
+    <!-- Wrapper del mapa con posicionamiento relativo para la tarjeta flotante -->
+    <div class="relative w-full rounded-xl overflow-hidden border border-slate-800">
+      <div id="mapa" style="height: 520px; width: 100%;" class="z-0"></div>
+
+      <!-- Tarjeta Flotante Inferior Derecha (KPIs & Reporte CSV) -->
+      <div id="panel-resumen-flotante" class="absolute bottom-4 right-4 z-[500] bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-3.5 shadow-2xl text-xs max-w-[280px] transition-all duration-300">
+        <div id="contenido-resumen">
+          <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
+            <span class="font-bold text-white flex items-center gap-1.5">
+              <span>🇲🇽</span> Cobertura Nacional
+            </span>
+            <span class="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-medium">32 Entidades</span>
+          </div>
+          <div class="space-y-1.5 text-[11px] text-slate-300">
+            <p class="flex justify-between"><span>Estados en Riesgo Crítico:</span> <strong id="kpi-rojos" class="text-rose-400">Calculando...</strong></p>
+            <p class="flex justify-between"><span>Estados en Riesgo Medio:</span> <strong id="kpi-amarillos" class="text-amber-400">...</strong></p>
+            <p class="flex justify-between"><span>Estados en Riesgo Bajo:</span> <strong id="kpi-verdes" class="text-emerald-400">...</strong></p>
+            <p class="flex justify-between border-t border-slate-800/80 pt-1"><span>Participación Estimada:</span> <strong id="kpi-part" class="text-white">...</strong></p>
+          </div>
+        </div>
+
+        <button onclick="exportarReporteCSV()" class="mt-3 w-full bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 font-medium py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition text-[11px]">
+          <span>📥</span> <span id="btn-exportar-texto">Exportar Resumen Nacional (CSV)</span>
+        </button>
+      </div>
+    </div>
   </div>
 
-  <!-- Panel Lateral -->
+  <!-- Panel Lateral Informativo -->
   <div class="space-y-4">
+    <!-- Selector de Estado -->
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
       <h3 class="text-xs font-semibold text-slate-300 mb-2">Filtrar por Entidad Federativa:</h3>
       <select id="select-estado" onchange="cambiarEstado()" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500">
         <option value="TODO EL PAÍS">Todo el País (Nacional)</option>
       </select>
+      <p class="text-[10px] text-slate-400 mt-2">
+        Selecciona una entidad para auditar sus indicadores y descargar sus secciones vulnerables.
+      </p>
     </div>
 
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-lg">
-      <h3 class="text-xs font-semibold text-slate-300">Criterio Estadístico (Z-Score):</h3>
-      <div class="text-[11px] space-y-2 text-slate-400">
-        <p><strong class="text-rose-400">🔴 Riesgo Crítico:</strong> Z &lt; -1.25 σ (Foco rojo).</p>
-        <p><strong class="text-amber-400">🟡 Riesgo Medio:</strong> -1.25 &le; Z &lt; -0.50 σ (Alerta preventiva).</p>
-        <p><strong class="text-emerald-400">🟢 Riesgo Bajo:</strong> Z &ge; -0.50 σ (Participación normal).</p>
+    <!-- Criterio Metodológico Z-Score -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2.5 shadow-lg">
+      <h3 class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+        <span>📐</span> Metodología de Riesgo (Z-Score)
+      </h3>
+      <p class="text-[11px] text-slate-400 leading-relaxed">
+        Normalizado por entidad federativa para respetar las realidades demográficas de cada estado:
+      </p>
+      <div class="text-[11px] space-y-1.5 text-slate-300">
+        <p><strong class="text-rose-400">🔴 Crítico ($Z < -1.25\,\sigma$):</strong> Desplome severo frente a su historia local.</p>
+        <p><strong class="text-amber-400">🟡 Medio ($-1.25 \le Z < -0.50$):</strong> Alerta preventiva de baja afluencia.</p>
+        <p><strong class="text-emerald-400">🟢 Bajo ($Z \ge -0.50\,\sigma$):</strong> Participación esperada en rango normal.</p>
       </div>
     </div>
 
-    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 text-center">
-      <p class="text-xs text-slate-400 mb-3">¿Deseas simular una política pública preventiva?</p>
-      <a href="/simulador" class="inline-block w-full bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 text-xs font-medium py-2.5 rounded-xl transition">
-        Abrir Simulador What-If ➔
-      </a>
+    <!-- Enfoque de Política Pública Institucional -->
+    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
+      <h3 class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+        <span>🏛️</span> Aplicación Institucional
+      </h3>
+      <p class="text-[11px] text-slate-400 leading-relaxed">
+        Herramienta de apoyo para <strong>DECEYEC</strong> y <strong>DEOE</strong> en la priorización de brigadas de campo, talleres cívicos juveniles y logística de casillas durante el periodo interelectoral.
+      </p>
+      <div class="pt-2">
+        <a href="/simulador" class="inline-block w-full text-center bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 text-xs font-medium py-2 rounded-xl transition">
+          Simular Mitigación What-If ➔
+        </a>
+      </div>
     </div>
   </div>
 
 </div>
 
 <script>
-  // Obtención segura de la API Key: toma la inyectada por el backend o tu clave validada
   const cartoApiKey = "{{ carto_api_key|default('') }}".trim() || "cb1_40yx_1_b53b1be7b1ac3fa9f4f5165b";
   const authParam = cartoApiKey ? `?key=${cartoApiKey}` : '';
 
   let map = null;
-  let layers = null;
   let labelsLayer = null;
   let geojsonLayer = null;
   let rawGeoJSON = null;
   let cacheMetricasEstados = {};
   let estadoActualSeleccionado = "TODO EL PAÍS";
+  let puntosCriticosActuales = [];
 
-  // Normalizador de nombres formales para evitar ruido en tooltips
   function simplificarNombreEstado(nombre) {
     if (!nombre) return "Estado";
-    
     const mapaNombres = {
       "COAHUILA DE ZARAGOZA": "Coahuila",
       "VERACRUZ DE IGNACIO DE LA LLAVE": "Veracruz",
@@ -101,12 +155,8 @@
       "MÉXICO": "Estado de México",
       "MEXICO": "Estado de México"
     };
-
     const key = nombre.trim().toUpperCase();
-    if (mapaNombres[key]) {
-      return mapaNombres[key];
-    }
-
+    if (mapaNombres[key]) return mapaNombres[key];
     return nombre.toLowerCase().replace(/(^|\s)\S/g, l => l.toUpperCase());
   }
 
@@ -115,14 +165,12 @@
 
     map = L.map('mapa').setView([23.6345, -102.5528], 5);
 
-    // 1. Capa base oscura 100% limpia sin texto (CartoDB No Labels)
     const baseTilesUrl = `https://basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}.png${authParam}`;
     L.tileLayer(baseTilesUrl, {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/" target="_blank">CARTO</a>'
     }).addTo(map);
 
-    // 2. Panel superior exclusivo para etiquetas con clicks desactivados
     map.createPane('labelsPane');
     map.getPane('labelsPane').style.zIndex = 450;
     map.getPane('labelsPane').style.pointerEvents = 'none';
@@ -133,7 +181,6 @@
       pane: 'labelsPane'
     });
 
-    // 3. Activar nombres de calles/colonias solo cuando se hace zoom a nivel local (>= 10)
     map.on('zoomend', () => {
       const zoom = map.getZoom();
       if (zoom >= 10) {
@@ -142,8 +189,6 @@
         if (map.hasLayer(labelsLayer)) map.removeLayer(labelsLayer);
       }
     });
-
-    layers = L.layerGroup().addTo(map);
   }
 
   async function cargarGeoJSON() {
@@ -187,7 +232,6 @@
       };
     }
 
-    // Estados inactivos: atenuados pero totalmente clicables
     return {
       fillColor: color,
       weight: 1,
@@ -204,6 +248,119 @@
       const nombre = layer.feature.properties.state_name || (cacheMetricasEstados[cve] ? cacheMetricasEstados[cve].nombre : "");
       layer.setStyle(obtenerEstiloEstado(cve, nombre));
     });
+  }
+
+  function actualizarPanelFlotante() {
+    const contenedor = document.getElementById('contenido-resumen');
+    const btnTexto = document.getElementById('btn-exportar-texto');
+
+    if (estadoActualSeleccionado === "TODO EL PAÍS") {
+      btnTexto.innerText = "Exportar Resumen Nacional (CSV)";
+      
+      let rojos = 0, amarillos = 0, verdes = 0, sumaPart = 0, count = 0;
+      Object.values(cacheMetricasEstados).forEach(m => {
+        if (m.color === '#f43f5e' || (m.etiqueta && m.etiqueta.includes('Crítico'))) rojos++;
+        else if (m.color === '#f59e0b' || (m.etiqueta && m.etiqueta.includes('Medio'))) amarillos++;
+        else if (m.color === '#10b981' || (m.etiqueta && m.etiqueta.includes('Bajo'))) verdes++;
+        if (m.participacion_media) {
+          sumaPart += parseFloat(m.participacion_media);
+          count++;
+        }
+      });
+      const mediaNac = count > 0 ? (sumaPart / count).toFixed(1) : "59.8";
+
+      contenedor.innerHTML = `
+        <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
+          <span class="font-bold text-white flex items-center gap-1.5">
+            <span>🇲🇽</span> Cobertura Nacional
+          </span>
+          <span class="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-medium">32 Entidades</span>
+        </div>
+        <div class="space-y-1.5 text-[11px] text-slate-300">
+          <p class="flex justify-between"><span>Estados en Riesgo Crítico:</span> <strong class="text-rose-400">${rojos} estados</strong></p>
+          <p class="flex justify-between"><span>Estados en Riesgo Medio:</span> <strong class="text-amber-400">${amarillos} estados</strong></p>
+          <p class="flex justify-between"><span>Estados en Riesgo Bajo:</span> <strong class="text-emerald-400">${verdes} estados</strong></p>
+          <p class="flex justify-between border-t border-slate-800/80 pt-1"><span>Participación Estimada:</span> <strong class="text-white">${mediaNac}%</strong></p>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-2 text-center">💡 Selecciona un estado para consultar el detalle de sus casillas</p>
+      `;
+    } else {
+      const nombreLimpio = simplificarNombreEstado(estadoActualSeleccionado);
+      btnTexto.innerText = `Exportar Focos Rojos de ${nombreLimpio} (CSV)`;
+
+      let meta = null;
+      for (const m of Object.values(cacheMetricasEstados)) {
+        if (m.nombre && m.nombre.trim().toUpperCase() === estadoActualSeleccionado.trim().toUpperCase()) {
+          meta = m;
+          break;
+        }
+      }
+
+      const totalCasillas = meta ? meta.total_casillas : 0;
+      const focosRojos = meta ? meta.focos_rojos : puntosCriticosActuales.length;
+      const pctCritico = meta ? meta.pct_critico : (totalCasillas > 0 ? ((focosRojos / totalCasillas) * 100).toFixed(1) : 0);
+      const partEst = meta ? meta.participacion_media : "N/D";
+      const etiqueta = meta ? meta.etiqueta : "Riesgo";
+      const badgeColor = (meta && meta.color === '#f43f5e') ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
+                         (meta && meta.color === '#f59e0b') ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+                         'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+
+      contenedor.innerHTML = `
+        <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
+          <span class="font-bold text-white flex items-center gap-1.5 truncate">
+            <span>📍</span> ${nombreLimpio}
+          </span>
+          <span class="text-[10px] border px-2 py-0.5 rounded-full font-medium shrink-0 ${badgeColor}">
+            ${etiqueta}
+          </span>
+        </div>
+        <div class="space-y-1.5 text-[11px] text-slate-300">
+          <p class="flex justify-between"><span>Casillas en Foco Rojo:</span> <strong class="text-rose-400">${focosRojos} (${pctCritico}%)</strong></p>
+          <p class="flex justify-between"><span>Total Secciones Auditadas:</span> <strong class="text-slate-200">${totalCasillas}</strong></p>
+          <p class="flex justify-between border-t border-slate-800/80 pt-1"><span>Participación Proyectada:</span> <strong class="text-white">${partEst}%</strong></p>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-2 text-center border-t border-slate-800/80 pt-1.5">
+          📋 Descarga el reporte para auditar la lista de casillas y municipios.
+        </p>
+      `;
+    }
+  }
+
+  function exportarReporteCSV() {
+    let csvContenido = "";
+    let nombreArchivo = "";
+
+    if (estadoActualSeleccionado === "TODO EL PAÍS") {
+      csvContenido = "CVE_ENT,Estado,Nivel_Riesgo,Casillas_Criticas,Total_Casillas,Porcentaje_Critico,Participacion_Estimada_Pct\n";
+      Object.keys(cacheMetricasEstados).forEach(cve => {
+        const m = cacheMetricasEstados[cve];
+        const nombre = simplificarNombreEstado(m.nombre || "");
+        csvContenido += `${cve},"${nombre}","${m.etiqueta || ''}",${m.focos_rojos || 0},${m.total_casillas || 0},${m.pct_critico || 0},${m.participacion_media || 0}\n`;
+      });
+      nombreArchivo = "votovigia_resumen_nacional_riesgo_ine.csv";
+    } else {
+      if (!puntosCriticosActuales || puntosCriticosActuales.length === 0) {
+        alert("No hay focos rojos registrados para exportar en esta entidad.");
+        return;
+      }
+      csvContenido = "Entidad,Seccion_Electoral,Municipio,Latitud,Longitud,Nivel_Riesgo\n";
+      const nomEnt = simplificarNombreEstado(estadoActualSeleccionado);
+      puntosCriticosActuales.forEach(p => {
+        csvContenido += `"${nomEnt}",${p.SECCION || ''},"${p.MPIONOM || ''}",${p.lat || ''},${p.lng || ''},"Critico (Z < -1.25)"\n`;
+      });
+      const slug = nomEnt.toLowerCase().replace(/\s+/g, '_');
+      nombreArchivo = `votovigia_focos_rojos_${slug}.csv`;
+    }
+
+    const blob = new Blob(["\uFEFF" + csvContenido], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", nombreArchivo);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   function renderizarCapaGeoJSON() {
@@ -245,11 +402,8 @@
           },
           click: function (e) {
             L.DomEvent.stopPropagation(e);
-            
             const sel = document.getElementById('select-estado');
             let encontrado = false;
-            
-            // Buscar coincidencia en el combobox
             for (let i = 0; i < sel.options.length; i++) {
               const optVal = sel.options[i].value.trim().toUpperCase();
               if (optVal === nombreOriginal.trim().toUpperCase() || 
@@ -294,38 +448,25 @@
 
       const data = await res.json();
 
-      // Guardar métricas en caché para que las demás entidades no pierdan datos ni colores
       if (data.estados_metricas && Object.keys(data.estados_metricas).length > 0) {
         if (estado === "TODO EL PAÍS" || Object.keys(cacheMetricasEstados).length === 0) {
           cacheMetricasEstados = data.estados_metricas;
         }
       }
 
-      // Dibujar la capa por primera vez o solo refrescar estilos
+      puntosCriticosActuales = data.puntos_criticos || [];
+
       if (!geojsonLayer) {
         renderizarCapaGeoJSON();
       } else {
         actualizarEstilosMapa();
       }
 
-      // Desplazamiento suave de la vista
       if (data.centroide && data.zoom) {
         map.flyTo(data.centroide, data.zoom, { duration: 1.0 });
       }
 
-      // Puntos críticos / casillas
-      layers.clearLayers();
-      if (data.puntos_criticos && Array.isArray(data.puntos_criticos)) {
-        data.puntos_criticos.forEach(p => {
-          L.circleMarker([p.lat, p.lng], {
-            radius: 5,
-            fillColor: '#f43f5e',
-            color: '#be123c',
-            weight: 1.5,
-            fillOpacity: 0.9
-          }).bindPopup(`<b>Sección ${p.SECCION}</b><br>${p.MPIONOM || ''}<br><span style="color:#f43f5e">🔴 Foco Rojo</span>`).addTo(layers);
-        });
-      }
+      actualizarPanelFlotante();
 
     } catch (err) {
       console.error("Error en cargarDatos:", err);
@@ -351,7 +492,6 @@
       console.error("Error cargando estados:", err);
     }
     
-    // Carga inicial nacional
     cargarDatos("TODO EL PAÍS");
   }
 
