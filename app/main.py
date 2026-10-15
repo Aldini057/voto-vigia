@@ -6,8 +6,8 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List, Dict, Any
 
 # 1. Configuración de rutas de módulos
 sys.path.append(os.path.abspath("src"))
@@ -16,7 +16,11 @@ from src.simulation.what_if_engine import WhatIfEngine
 # 2. CREAR INSTANCIA DE FASTAPI
 app = FastAPI(
     title="VotoVigía API",
-    description="Microservicio de Alerta Temprana y Simulación Contrafactual de Riesgo Electoral (Hackathon INE 2026)",
+    description=(
+        "Microservicio de Alerta Temprana y Simulación Contrafactual de Riesgo Electoral "
+        "(Hackathon INE 2026). Permite monitorear la salud del sistema, consultar el catálogo "
+        "de entidades federativas y ejecutar simulaciones de intervención con modelos CatBoost."
+    ),
     version="1.0.0"
 )
 
@@ -130,12 +134,72 @@ def geocodificar(df_sub, max_puntos=45):
     cols_ok = [c for c in cols if c in muestra.columns]
     return muestra[cols_ok].to_dict(orient="records")
 
+# Modelos Pydantic para Request / Response con documentación OpenAPI detallada
+class HealthResponse(BaseModel):
+    status: str = Field(
+        ...,
+        description="Estado operacional actual del microservicio.",
+        examples=["online"]
+    )
+    secciones: int = Field(
+        ...,
+        description="Cantidad total de secciones electorales 2024 cargadas en memoria.",
+        examples=[68235]
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "status": "online",
+                "secciones": 68235
+            }
+        }
+    )
+
 class SimulacionRequest(BaseModel):
-    delta_participacion_previa: float = Field(0.0, ge=-0.30, le=0.30)
-    delta_pct_jovenes: float = Field(0.0, ge=-0.10, le=0.10)
-    es_presidencial: int = Field(1, ge=0, le=1)
-    entidad: Optional[str] = None
-    estrategia_focalizada: Optional[bool] = False
+    delta_participacion_previa: float = Field(
+        0.0,
+        ge=-0.30,
+        le=0.30,
+        description="Variación porcentual esperada en la tasa de participación histórica (rango permitido: -0.30 a 0.30, equivalente a -30% a +30%).",
+        examples=[0.05]
+    )
+    delta_pct_jovenes: float = Field(
+        0.0,
+        ge=-0.10,
+        le=0.10,
+        description="Variación en la proporción del padrón correspondiente a jóvenes de 18-29 años (rango permitido: -0.10 a 0.10, equivalente a -10% a +10%).",
+        examples=[0.02]
+    )
+    es_presidencial: int = Field(
+        1,
+        ge=0,
+        le=1,
+        description="Indicador binario del tipo de elección: 1 para elección presidencial concurrente, 0 para elección intermedia.",
+        examples=[1]
+    )
+    entidad: Optional[str] = Field(
+        None,
+        description="Nombre de la entidad federativa a analizar (ej. 'JALISCO', 'CIUDAD DE MEXICO') o None / 'TODO EL PAÍS' para simulación nacional.",
+        examples=["JALISCO"]
+    )
+    estrategia_focalizada: Optional[bool] = Field(
+        False,
+        description="Activa la focalización de la estrategia y cálculo de beneficios a nivel municipal prioritario.",
+        examples=[True]
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "delta_participacion_previa": 0.05,
+                "delta_pct_jovenes": 0.02,
+                "es_presidencial": 1,
+                "entidad": "JALISCO",
+                "estrategia_focalizada": True
+            }
+        }
+    )
 
 # ==========================================
 # RUTAS DE PÁGINAS WEB (HTML / JINJA2)
@@ -176,9 +240,16 @@ def page_metricas(request: Request):
 # ==========================================
 # ENDPOINTS REST DE LA API
 # ==========================================
-@app.get("/api/health", tags=["Estado"])
-def health_check():
-    return {"status": "online", "secciones": len(df_2024)}
+@app.get(
+    "/api/health",
+    tags=["Estado"],
+    summary="Verificar salud y disponibilidad del servicio",
+    description="Comprueba que la API esté activa y reporta la cantidad de secciones electorales cargadas en memoria.",
+    response_description="Estado operacional del microservicio y total de secciones disponibles.",
+    response_model=HealthResponse
+)
+def health_check() -> HealthResponse:
+    return HealthResponse(status="online", secciones=len(df_2024))
 
 @app.get("/api/metrics", tags=["Métricas"])
 def get_metrics():
@@ -187,14 +258,105 @@ def get_metrics():
             return json.load(f)
     return {"accuracy": 0.854, "f1_macro_catboost": 0.782}
 
-@app.get("/api/states", tags=["Geografía"])
+@app.get(
+    "/api/states",
+    tags=["Geografía"],
+    summary="Obtener catálogo ordenado de entidades federativas",
+    description="Retorna la lista alfabética de todos los nombres de estados presentes en el dataset electoral 2024.",
+    response_description="Lista ordenada alfabéticamente de entidades federativas disponibles.",
+    response_model=List[str],
+    responses={
+        200: {
+            "description": "Catálogo de entidades recuperado exitosamente.",
+            "content": {
+                "application/json": {
+                    "example": ["AGUASCALIENTES", "BAJA CALIFORNIA", "CIUDAD DE MEXICO", "JALISCO", "ZACATECAS"]
+                }
+            }
+        }
+    }
+)
 def get_states() -> List[str]:
     if not df_2024.empty and "EDONOM" in df_2024.columns:
         return sorted(df_2024["EDONOM"].dropna().unique().tolist())
     return []
 
-@app.post("/api/simulate", tags=["Simulación What-If"])
-def simulate_intervention(req: SimulacionRequest):
+@app.post(
+    "/api/simulate",
+    tags=["Simulación What-If"],
+    summary="Ejecutar simulación contrafactual What-If de riesgo electoral",
+    description=(
+        "Evalúa el impacto de intervenciones focalizadas (cambios en participación ciudadana y "
+        "composición demográfica juvenil) sobre las secciones electorales en riesgo crítico mediante "
+        "el motor de inferencia CatBoost. Permite filtrar por una entidad específica o a nivel nacional."
+    ),
+    response_description="Métricas de impacto, KPIs de mitigación, top de municipios y muestras geocodificadas para mapa interactivo.",
+    response_model=Dict[str, Any],
+    responses={
+        200: {
+            "description": "Simulación procesada exitosamente.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "entidad_analizada": "JALISCO",
+                        "centroide": [20.6597, -103.3496],
+                        "zoom": 8,
+                        "total_secciones": 3619,
+                        "criticos_base": 142,
+                        "criticos_simulado": 89,
+                        "casillas_rescatadas": 53,
+                        "reduccion_riesgo_pct": 37.32,
+                        "votos_adicionales_estimados": 11925,
+                        "kpis": {
+                            "votos_recuperados": 11925,
+                            "focos_rojos_iniciales": 142,
+                            "focos_rojos_mitigados": 53,
+                            "tasa_mitigacion_pct": 37.32,
+                            "participacion_base_pct": 58.4,
+                            "participacion_simulada_pct": 61.4,
+                            "secciones_medias_base": 850,
+                            "secciones_medias_sim": 820,
+                            "secciones_bajas_base": 2627,
+                            "secciones_bajas_sim": 2710
+                        },
+                        "top_municipios": [
+                            {
+                                "municipio": "GUADALAJARA",
+                                "votos_ganados": 4500,
+                                "focos_apagados": 20
+                            }
+                        ],
+                        "puntos_criticos": [],
+                        "puntos_medios": [],
+                        "puntos_bajos": [],
+                        "puntos_rescatados": [],
+                        "estados_metricas": {
+                            "14": {
+                                "nombre": "JALISCO",
+                                "total_casillas": 3619,
+                                "focos_rojos": 89,
+                                "pct_critico": 2.5,
+                                "participacion_media": 60.1,
+                                "color": "#10b981",
+                                "etiqueta": "Riesgo Bajo"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "No se encontraron casillas o secciones para la entidad especificada."
+        },
+        422: {
+            "description": "Error de validación en los parámetros de la solicitud."
+        },
+        500: {
+            "description": "Dataset maestro no disponible en memoria."
+        }
+    }
+)
+def simulate_intervention(req: SimulacionRequest) -> Dict[str, Any]:
     if df_2024.empty:
         raise HTTPException(status_code=500, detail="Dataset no cargado.")
 
