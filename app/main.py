@@ -103,36 +103,38 @@ if not df_2024.empty:
     except Exception as e:
         print(f"[AVISO] No se pudo precalcular base estatal: {e}")
 
+# Precalcular subsets por entidad y catálogo ordenado para evitar filtros booleanos repetitivos y copias
+ESTADOS_CACHE: Dict[str, pd.DataFrame] = {}
+LISTA_ESTADOS_ORDENADA: List[str] = []
+if not df_2024.empty and "EDONOM" in df_2024.columns:
+    LISTA_ESTADOS_ORDENADA = sorted(df_2024["EDONOM"].dropna().unique().tolist())
+    for edo in LISTA_ESTADOS_ORDENADA:
+        ESTADOS_CACHE[edo] = df_2024[df_2024["EDONOM"] == edo]
+
 def geocodificar(df_sub, max_puntos=45):
-    """Genera coordenadas en tierra firme para cada sección."""
+    """Genera coordenadas en tierra firme para cada sección optimizado evitando iterrows()."""
     if df_sub is None or len(df_sub) == 0:
         return []
     n = min(max_puntos, len(df_sub))
-    muestra = df_sub.head(n).copy()
-    lats, lngs = [], []
+    cols = ["id_seccion", "EDONOM", "MPIONOM", "SECCION", "TIPOSEC", "ln_total", "participacion"]
+    cols_ok = [c for c in cols if c in df_sub.columns]
     
-    for _, row in muestra.iterrows():
-        edo_raw = str(row.get("EDONOM", "JALISCO")).upper()
+    # Extraer directamente registros sin duplicar DataFrames completos ni usar iterrows() lento
+    records = df_sub.iloc[:n][cols_ok].to_dict(orient="records")
+    for rec in records:
+        edo_raw = str(rec.get("EDONOM", "JALISCO")).upper()
         edo_clean = (edo_raw.replace("Á","A").replace("É","E").replace("Í","I")
                             .replace("Ó","O").replace("Ú","U"))
-        coords = COORDENADAS_ESTADOS.get(edo_clean, [23.6345, -102.5528])
-        lat_c, lng_c = coords
+        lat_c, lng_c = COORDENADAS_ESTADOS.get(edo_clean, [23.6345, -102.5528])
         
-        sec_id = str(row.get("id_seccion", "00_0000"))
+        sec_id = str(rec.get("id_seccion", "00_0000"))
         h1 = (int(abs(hash(sec_id))) % 1000) / 1000.0 - 0.5
         h2 = (int(abs(hash(sec_id + "_lng"))) % 1000) / 1000.0 - 0.5
         
-        desp_lat = h1 * 0.28
-        desp_lng = h2 * 0.32
+        rec["lat"] = round(float(lat_c + h1 * 0.28), 5)
+        rec["lng"] = round(float(lng_c + h2 * 0.32), 5)
         
-        lats.append(round(float(lat_c + desp_lat), 5))
-        lngs.append(round(float(lng_c + desp_lng), 5))
-        
-    muestra["lat"] = lats
-    muestra["lng"] = lngs
-    cols = ["id_seccion", "EDONOM", "MPIONOM", "SECCION", "TIPOSEC", "ln_total", "participacion", "lat", "lng"]
-    cols_ok = [c for c in cols if c in muestra.columns]
-    return muestra[cols_ok].to_dict(orient="records")
+    return records
 
 # Modelos Pydantic para Request / Response con documentación OpenAPI detallada
 class HealthResponse(BaseModel):
@@ -277,9 +279,7 @@ def get_metrics():
     }
 )
 def get_states() -> List[str]:
-    if not df_2024.empty and "EDONOM" in df_2024.columns:
-        return sorted(df_2024["EDONOM"].dropna().unique().tolist())
-    return []
+    return LISTA_ESTADOS_ORDENADA
 
 @app.post(
     "/api/simulate",
@@ -361,20 +361,23 @@ def simulate_intervention(req: SimulacionRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Dataset no cargado.")
 
     if req.entidad and req.entidad != "TODO EL PAÍS":
-        df_target = df_2024[df_2024["EDONOM"] == req.entidad].copy()
+        df_target = ESTADOS_CACHE.get(req.entidad)
+        if df_target is None:
+            # Fallback a búsqueda dinámica por si se introdujo con variación de mayúsculas/minúsculas
+            df_target = df_2024[df_2024["EDONOM"] == req.entidad]
         edo_clean = (req.entidad.upper().replace("Á","A").replace("É","E")
                                 .replace("Í","I").replace("Ó","O").replace("Ú","U"))
         centroide = COORDENADAS_ESTADOS.get(edo_clean, [23.6345, -102.5528])
         zoom = 8
     else:
-        df_target = df_2024.copy()
+        df_target = df_2024
         centroide = [23.6345, -102.5528]
         zoom = 5
 
     if df_target.empty:
         raise HTTPException(status_code=404, detail="No se encontraron casillas.")
 
-    # Ejecutar simulación con el motor CatBoost oficial
+    # Ejecutar simulación con el motor CatBoost oficial (el motor realiza su propio copy interno)
     res = engine.simular_intervencion(
         df_base=df_target,
         delta_participacion_previa=req.delta_participacion_previa,
@@ -399,8 +402,8 @@ def simulate_intervention(req: SimulacionRequest) -> Dict[str, Any]:
     # Copiar métricas base para que el mapa NUNCA pierda los otros 31 estados
     estados_metricas = {k: dict(v) for k, v in ESTADOS_METRICAS_BASE.items()}
 
-    # Actualizar la entidad o entidades afectadas
-    for edo_cve, grupo in df_res.groupby("EDOCVE"):
+    # Actualizar la entidad o entidades afectadas (sort=False para evitar ordenamientos costosos)
+    for edo_cve, grupo in df_res.groupby("EDOCVE", sort=False):
         total_sec = len(grupo)
         r_sim_g = pd.to_numeric(grupo["riesgo_simulado"], errors="coerce").fillna(0).astype(int)
         n_crit = int((r_sim_g == 2).sum())
@@ -432,24 +435,29 @@ def simulate_intervention(req: SimulacionRequest) -> Dict[str, Any]:
             "etiqueta": etiqueta
         }
 
-    # Top municipios beneficiados para el simulador
+    # Top municipios beneficiados para el simulador optimizado
     top_municipios = []
     if "MPIONOM" in df_res.columns:
-        df_res_work = df_res.copy()
-        df_res_work["_rescatada"] = ((r_base == 2) & (r_sim < 2)).astype(int)
-        ln_col = df_res_work["ln_total"] if "ln_total" in df_res_work.columns else 1500
-        df_res_work["_votos_est"] = (df_res_work["_rescatada"] * ln_col * 0.15).astype(int)
+        rescatada_arr = ((r_base == 2) & (r_sim < 2)).astype(int)
+        ln_col = df_res["ln_total"] if "ln_total" in df_res.columns else 1500
+        votos_est_arr = (rescatada_arr * ln_col * 0.15).astype(int)
 
-        resumen_mpio = df_res_work.groupby("MPIONOM").agg(
-            votos_ganados=("_votos_est", "sum"),
-            focos_apagados=("_rescatada", "sum")
-        ).reset_index().sort_values(by="votos_ganados", ascending=False).head(5)
+        # Construir dataframe ligero únicamente con las 3 columnas necesarias
+        df_res_work = pd.DataFrame({
+            "MPIONOM": df_res["MPIONOM"].values,
+            "votos_ganados": votos_est_arr.values,
+            "focos_apagados": rescatada_arr.values
+        })
 
-        for _, row in resumen_mpio.iterrows():
+        resumen_mpio = df_res_work.groupby("MPIONOM", as_index=False, sort=False).sum().sort_values(
+            by="votos_ganados", ascending=False
+        ).head(5)
+
+        for row in resumen_mpio.itertuples(index=False):
             top_municipios.append({
-                "municipio": str(row["MPIONOM"]),
-                "votos_ganados": int(row["votos_ganados"]),
-                "focos_apagados": int(row["focos_apagados"])
+                "municipio": str(row.MPIONOM),
+                "votos_ganados": int(row.votos_ganados),
+                "focos_apagados": int(row.focos_apagados)
             })
 
     # Empaquetado dual: compatible con index.html y con simulador.html
